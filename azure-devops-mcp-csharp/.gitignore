@@ -1,0 +1,39 @@
+# 项目和编译输出
+bin/
+obj/
+*.dll
+*.exe
+
+# 调试和发布
+Debug/
+Release/
+x64/
+x86/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.user
+*.suo
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 日志
+logs/
+*.log
+
+# NuGet
+.nuget/
+*.nupkg
+*.snupkg
+
+# 临时文件
+tmp/
+temp/

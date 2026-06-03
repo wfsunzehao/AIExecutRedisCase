@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "redis:cli": ".\\tools\\redis-client\\redis-cli.exe",
+    "mcp:cache-creation": "node skills/cache-creation/mcp/server.js",
+    "mcp:geo-replication-setup": "node skills/geo-replication-setup/mcp/server.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.59.1"
+  }
+}

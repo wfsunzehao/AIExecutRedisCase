@@ -1,0 +1,56 @@
+- generic [ref=e2]:
+  - navigation [ref=e3]:
+    - generic [ref=e5]:
+      - generic [ref=e6]:
+        - link "Gmail" [ref=e8] [cursor=pointer]:
+          - /url: https://mail.google.com/mail/&ogbl
+        - link "Search for Images" [ref=e10] [cursor=pointer]:
+          - /url: https://www.google.com/imghp?hl=en&ogbl
+          - text: Images
+      - button "Google apps" [ref=e13] [cursor=pointer]:
+        - img [ref=e14]
+      - link "Sign in" [ref=e18] [cursor=pointer]:
+        - /url: https://accounts.google.com/ServiceLogin?hl=en&passive=true&continue=https://www.google.com/&ec=futura_exp_og_so_72776762_e
+  - img "Google" [ref=e21]
+  - search [ref=e29]:
+    - generic [ref=e31]:
+      - generic [ref=e33]:
+        - button "Upload files or images" [ref=e35] [cursor=pointer]:
+          - img [ref=e37]
+        - combobox "Search" [active] [ref=e40]
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - button "Search by voice" [ref=e43] [cursor=pointer]:
+              - img [ref=e44]
+            - button "Search by image" [ref=e46] [cursor=pointer]:
+              - img [ref=e47]
+          - link "AI Mode" [ref=e49] [cursor=pointer]:
+            - generic [ref=e51]:
+              - img [ref=e53]
+              - generic [ref=e60]: AI Mode
+      - generic [ref=e62]:
+        - button "Google Search" [ref=e63] [cursor=pointer]
+        - button "I'm Feeling Lucky" [ref=e64] [cursor=pointer]
+  - generic [ref=e67]:
+    - text: "Google offered in:"
+    - link "繁體中文" [ref=e68] [cursor=pointer]:
+      - /url: https://www.google.com/setprefs?sig=0_fTga2b9gFk6kkZLdXRxRIU0v56M%3D&hl=zh-TW&source=homepage&sa=X&ved=0ahUKEwiwgKj5lfSTAxWroq8BHRpIDwYQ2ZgBCB4
+  - contentinfo [ref=e70]:
+    - generic [ref=e71]: Taiwan
+    - generic [ref=e72]:
+      - generic [ref=e73]:
+        - link "About" [ref=e74] [cursor=pointer]:
+          - /url: https://about.google/?utm_source=google-TW&utm_medium=referral&utm_campaign=hp-footer&fg=1
+        - link "Advertising" [ref=e75] [cursor=pointer]:
+          - /url: https://www.google.com/intl/en_tw/ads/?subid=ww-ww-et-g-awa-a-g_hpafoot1_1!o2&utm_source=google.com&utm_medium=referral&utm_campaign=google_hpafooter&fg=1
+        - link "Business" [ref=e76] [cursor=pointer]:
+          - /url: https://www.google.com/services/?subid=ww-ww-et-g-awa-a-g_hpbfoot1_1!o2&utm_source=google.com&utm_medium=referral&utm_campaign=google_hpbfooter&fg=1
+        - link "How Search works" [ref=e77] [cursor=pointer]:
+          - /url: https://google.com/search/howsearchworks/?fg=1
+      - generic [ref=e78]:
+        - link "Privacy" [ref=e79] [cursor=pointer]:
+          - /url: https://policies.google.com/privacy?hl=en-TW&fg=1
+        - link "Terms" [ref=e80] [cursor=pointer]:
+          - /url: https://policies.google.com/terms?hl=en-TW&fg=1
+        - button "Settings" [ref=e84] [cursor=pointer]:
+          - generic [ref=e85]: Settings

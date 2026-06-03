@@ -1,0 +1,53 @@
+# Secrets and local config
+config.json
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Build outputs
+**/bin/
+**/obj/
+**/Debug/
+**/Release/
+**/*.dll
+**/*.exe
+**/*.nupkg
+**/*.snupkg
+
+# Project-local Redis client binary
+!tools/redis-client/EventLog.dll
+!tools/redis-client/redis-benchmark.exe
+!tools/redis-client/redis-cli.exe
+
+# IDE and temp files
+**/.vscode/
+**/.vs/
+**/.idea/
+**/*.user
+**/*.suo
+**/*.swp
+**/*.swo
+**/*~
+
+# Workspace runtime data
+backups/
+cache/
+ide/
+projects/
+sessions/
+artifacts/
+
+# Screenshots
+*.png
+
+# Logs and temp
+**/logs/
+**/*.log
+**/tmp/
+**/temp/
+
+# Node dependencies
+node_modules/
+
+# Nested repository metadata backups
+*.git-backup/
