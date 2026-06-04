@@ -54,7 +54,7 @@ const REGION_DISPLAY = {
 
 // ── Helper: az CLI wrapper ───────────────────────────────────────────────────
 function az(args, { quiet = false, json = false } = {}) {
-  const r = spawnSync(AZ_CMD, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(AZ_CMD, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, shell: process.platform === "win32" });
   if (!quiet && r.stderr) process.stderr.write(r.stderr);
   if (r.status !== 0) {
     throw new Error(`az ${args.join(" ")} failed (status=${r.status}): ${r.stderr || r.stdout}`);
@@ -64,7 +64,7 @@ function az(args, { quiet = false, json = false } = {}) {
 }
 
 function azTry(args) {
-  const r = spawnSync(AZ_CMD, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const r = spawnSync(AZ_CMD, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, shell: process.platform === "win32" });
   return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
 }
 
@@ -201,7 +201,7 @@ async function assertGeoEnv({ subscription, resourceGroup, cdpPort = 9222 }) {
   await new Promise((resolve) => {
     const sock = net.connect(cdpPort, "127.0.0.1");
     sock.setTimeout(2000);
-    sock.on("connect", () => { sock.destroy(); check(`CDP Edge ${cdpPort}`, () => {}); resolve(); });
+    sock.on("connect", () => { sock.destroy(); check(`CDP Edge ${cdpPort}`, () => { }); resolve(); });
     sock.on("timeout", () => { sock.destroy(); check(`CDP Edge ${cdpPort}`, () => { throw new Error("timeout"); }); resolve(); });
     sock.on("error", (e) => { check(`CDP Edge ${cdpPort}`, () => { throw e; }); resolve(); });
   });
@@ -241,7 +241,7 @@ async function invokeGeoLinkUI({
   // 2) Filter right grid by clicking the secondary's region in the left Location list
   const region = secondaryRegionDisplay(secondary);
   if (region) {
-    await page.getByText(region, { exact: true }).first().click({ timeout: 8000 }).catch(() => {});
+    await page.getByText(region, { exact: true }).first().click({ timeout: 8000 }).catch(() => { });
     await page.waitForTimeout(2000);
   } else {
     console.log(`[geo] WARN no region mapping for secondary='${secondary}' — picker may show multiple regions`);
@@ -257,12 +257,12 @@ async function invokeGeoLinkUI({
 
   // 5) Submission evidence
   await clickByRole(page, "button", { name: "Notifications" }, { tolerate: true });
-  await page.screenshot({ path: `${prefix}-submit.png`, fullPage: false }).catch(() => {});
+  await page.screenshot({ path: `${prefix}-submit.png`, fullPage: false }).catch(() => { });
 
   // 6) Copy-tooltip evidence (Copied tooltip is authoritative; navigator.clipboard.readText is unreliable)
   await clickByRole(page, "button", { name: "Copy to clipboard" }, { tolerate: true });
   await page.waitForTimeout(400);
-  await page.screenshot({ path: `${prefix}-copied.png` }).catch(() => {});
+  await page.screenshot({ path: `${prefix}-copied.png` }).catch(() => { });
 
   console.log(`LINKED ${primary} -> ${secondary}`);
   return true;
@@ -408,7 +408,7 @@ async function invokeGeoFailover({
   await page.waitForTimeout(3000);
 
   await clickByRole(page, "button", { name: "Notifications" }, { tolerate: true });
-  await page.screenshot({ path: `${prefix}-submit.png` }).catch(() => {});
+  await page.screenshot({ path: `${prefix}-submit.png` }).catch(() => { });
   console.log(`FAILOVER SUBMITTED on ${cache} (trust blade state, not click exit code)`);
   return true;
 }
@@ -438,7 +438,7 @@ async function invokeRebootThenFailover({
   await page.getByRole("combobox", { name: /Port/i }).click({ timeout: 8000 });
   await page.waitForTimeout(800);
   await page.getByRole("treeitem", { name: /Replica - 15001/i }).click({ timeout: 8000 });
-  await page.keyboard.press("Escape").catch(() => {});
+  await page.keyboard.press("Escape").catch(() => { });
   await page.waitForTimeout(500);
 
   await page.getByRole("button", { name: "Reboot", exact: true }).click({ timeout: 8000 });
@@ -459,7 +459,7 @@ async function invokeRebootThenFailover({
   await page.waitForTimeout(3000);
   await clickByRole(page, "button", { name: "Notifications" }, { tolerate: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(5, 16); // MM-DDTHH-mm
-  await page.screenshot({ path: `reboot-failover-notifications-${stamp}.png` }).catch(() => {});
+  await page.screenshot({ path: `reboot-failover-notifications-${stamp}.png` }).catch(() => { });
   return { rebootAt: tReboot, failoverAt: tFo, deltaSec: Math.floor((tFo - tReboot) / 1000) };
 }
 
@@ -472,7 +472,7 @@ async function assertConcurrentNotifications({ page, screenshotPath } = {}) {
   await page.getByRole("button", { name: "Notifications" }).click({ timeout: 5000 });
   await page.getByText("Rebooting cache").waitFor({ state: "visible", timeout: 5000 });
   await page.getByText("Submitting failover request").waitFor({ state: "visible", timeout: 5000 });
-  await page.screenshot({ path: out }).catch(() => {});
+  await page.screenshot({ path: out }).catch(() => { });
   console.log(`[PASS] concurrent Rebooting + Failover notifications observed -> ${out}`);
   return out;
 }
@@ -558,7 +558,7 @@ async function invokeGeoUnlink({
     await page.getByRole("button", { name: "Unlink caches", exact: true }).click({ timeout: 8000 });
     await clickByRole(page, "button", { name: "Yes", exact: true }, { tolerate: true });
     await page.waitForTimeout(3000);
-    await page.screenshot({ path: `unlink-${caches[0]}-submit.png` }).catch(() => {});
+    await page.screenshot({ path: `unlink-${caches[0]}-submit.png` }).catch(() => { });
   }
 
   async function doArm() {

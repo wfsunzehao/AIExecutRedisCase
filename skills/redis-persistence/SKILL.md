@@ -146,8 +146,9 @@ reference convention from ADO 15379484 run history.
 
 ### Reading semantics (very common error)
 
-- **`redisConfiguration.aof-backup-enabled` / `rdb-backup-enabled` are strings** (`"true"`/`"false"`), not booleans. `waitPersistenceReady` already compares against `"true"`.
+- **Persistence flags are strings** (`"true"`/`"false"`), not booleans. Azure responses can expose either legacy kebab-case keys (`redisConfiguration.aof-backup-enabled` / `rdb-backup-enabled`) or current camelCase keys (`aofBackupEnabled` / `rdbBackupEnabled`, plus `rdbBackupFrequency`). `waitPersistenceReady` must read both shapes before comparing against `"true"`.
 - **`redis-benchmark -r 20000` produces ~19,000–19,900 unique keys**, not 20,000 (hash collisions). DBSIZE assertions must use `>= 19000`, not `== 20000`.
+- **Clustered cache DBSIZE is shard-scoped through a single `redis-cli` connection.** A clustered Premium cache populated with `-r 20000` can return `DBSIZE = 10000` from one shard even when AOF/RDB persistence is working across all shards. For clustered persistence tests, treat benchmark success plus AOF/RDB blobs across shard-prefixed paths as the primary pass signal. Use a cluster-aware DBSIZE aggregation only when the test explicitly requires total key count.
 - **Persistence Save returns control before the cache transitions to `Succeeded`.** The control plane may report `Updating` for 5–30 min. Always chain `waitPersistenceReady` after `invokePersistenceEnableUI`.
 - **AOF blob name contains `aof`; RDB blob name contains `rdb`.** Pattern matching is case-insensitive in `assertPersistenceBlob` (uses `String#toLowerCase`).
 
@@ -199,6 +200,39 @@ const pers = require("d:/junru/skills/redis-persistence/create-persistence.js");
 '@
 node -e $js
 ```
+
+**Portal UI path (required when the test demands visible Portal operations)**
+
+Use the Azure Portal create blade instead of CLI/ARM when resource creation must be
+page-click evidence. The Storage Account form is rendered inside a
+`sandbox-*.reactblade-ms.portal.azure.net` iframe, not the main Portal DOM.
+
+Mandatory Portal settings for Redis Persistence runs:
+
+- Resource group: same test RG as the cache.
+- Region: same cache region when available. EUAP options render with geography
+  prefixes such as `(US) East US 2 EUAP` and `(US) Central US EUAP`.
+- Primary service: `Azure Blob Storage or Azure Data Lake Storage`.
+- Primary workload: select a general Blob workload if the page marks it required;
+  otherwise Review may show a blank summary value and still pass.
+- Performance: `Standard`.
+- Redundancy: explicitly select `Locally redundant storage (LRS)`.
+- Minimum TLS: `Version 1.2`.
+- Public network access: enabled from all networks unless the test says otherwise.
+
+Portal interaction rules:
+
+1. Locate the active iframe by body text containing `Storage account name` and
+  `Project details`; the main page may show only `Create a storage account`.
+2. Use frame-scoped locators for all inputs/options. Do not read option
+  bounding boxes inside the iframe and click them with main-page coordinates;
+  frame coordinate offsets can select the wrong region (for example Japan West).
+3. For the Region dropdown, open the listbox and click the exact option name,
+  e.g. `getByRole("option", { name: /East US 2 EUAP/i })`. Filtering text alone
+  can be swallowed by the Fluent combobox.
+4. On Review, verify the summary contains the intended RG, location, storage
+  account name, primary service, LRS redundancy, and TLS 1.2 before clicking
+  `Create`.
 
 **Pre-conditions**
 
@@ -543,7 +577,8 @@ node -e $js
 **Post-conditions / Verification**
 
 - `PING -> PONG`.
-- `DBSIZE >= 19000` (benchmark `-r 20000` random keys yield ~5 % hash collisions). Throws otherwise.
+- Non-clustered: `DBSIZE >= 19000` (benchmark `-r 20000` random keys can collide). Throws otherwise.
+- Clustered: plain `redis-cli DBSIZE` can return one shard's key count (for example `10000` after a `-r 20000` load). Do not fail clustered persistence solely on shard-scoped DBSIZE when benchmark succeeded and matching AOF/RDB blobs are present.
 - Returns `{ host, dbsize }` for the caller to record.
 
 **Pitfalls**
@@ -713,8 +748,8 @@ enumerate them.
 - [ ] Storage account `Succeeded` (Capability 3).
 - [ ] `enableNonSslPort = true` during the run (Capability 4).
 - [ ] Persistence Save submitted via Portal UI with mode-correct radio (Capability 5).
-- [ ] Cache returned to `Succeeded` with `aof-backup-enabled` / `rdb-backup-enabled = "true"` (Capability 5 wait step).
-- [ ] DBSIZE ≥ 19 000 after populate (Capability 6).
+- [ ] Cache returned to `Succeeded` with `aof-backup-enabled` / `rdb-backup-enabled = "true"` or `aofBackupEnabled` / `rdbBackupEnabled = "true"` (Capability 5 wait step).
+- [ ] Non-clustered DBSIZE ≥ 19 000 after populate; clustered DBSIZE recorded with shard-scope caveat unless a cluster-aware aggregation is implemented (Capability 6).
 - [ ] At least one blob matching `*aof*` (and/or `*rdb*`) in `<cacheLower>-redis-persistence` (Capability 7).
 - [ ] Three-file screenshot triplet `pers-<cache>-<mode>-{open,sa,saved}.png` per mode.
 - [ ] Teardown returned clean (Capability 8).

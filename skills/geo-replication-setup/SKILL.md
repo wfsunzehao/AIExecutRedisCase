@@ -31,7 +31,7 @@ applyTo: "**"
 | # | Capability | Anchor | Helper(s) in [create-geo.js](create-geo.js) |
 |---|---|---|---|
 | 1 | Prereq | [#capability-1-geo-prereq](#capability-1-geo-prereq) | `assertGeoEnv` |
-| 3 | Link | [#capability-3-geo-link](#capability-3-geo-link) | `invokeGeoLinkUI`, `invokeGeoLinkArm`, `waitGeoLink`, `assertGeoPair` |
+| 3 | Link | [#capability-3-geo-link](#capability-3-geo-link) | `invokeGeoLinkUI`, Portal list-blade polling, Portal row verification |
 | 4 | Failover | [#capability-4-geo-failover](#capability-4-geo-failover) | `invokeGeoFailover`, `assertGeoRoleFlip`, `testGeoActivityLog` |
 | 5 | Reboot-then-failover | [#capability-5-geo-reboot-failover](#capability-5-geo-reboot-failover) | `invokeRebootThenFailover`, `assertConcurrentNotifications` |
 | 6 | Unlink | [#capability-6-geo-unlink](#capability-6-geo-unlink) | `invokeGeoUnlink`, `assertGeoUnlinked` |
@@ -62,10 +62,10 @@ section instead of restating its content.
   const geo = require("d:/junru/skills/geo-replication-setup/create-geo.js");
   const { chromium } = require("playwright");
   (async () => {
-    // ARM-only capabilities (Prereq, Teardown, parts of Link/Unlink):
+    // Environment checks only; do not use ARM/CLI for Geo operations.
     await geo.assertGeoEnv({ subscription, resourceGroup });
 
-    // UI capabilities — attach to CDP Edge, never close it:
+    // Geo operations must be completed through visible Portal UI clicks.
     const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
     const ctx = browser.contexts()[0];
     const page = ctx.pages().find(p => new URL(p.url()).hostname === "ms.portal.azure.com")
@@ -78,6 +78,13 @@ section instead of restating its content.
 
 - **Never create per-capability `.js` files** in `%TEMP%` or the workspace. Use the `$js = @'…'@; node -e $js` here-string pattern.
 - **Never call** `browser.disconnect()` or `browser.close()` after `connectOverCDP` — that would kill the real Edge. Let the Node process exit.
+- **Portal page-click only for Geo operations.** Link, unlink, failover,
+  reboot, teardown, and any equivalent management-plane action MUST be
+  initiated by visible Azure Portal clicks in the live CDP browser session.
+  Do not use ARM, Azure CLI, REST, SDK calls, or `invokeGeoLinkArm` /
+  management-plane fallback paths to perform the operation. If the Portal UI
+  cannot be clicked reliably, pause and ask the user to complete the exact
+  Portal action manually, then resume from page-visible evidence.
 
 ### CDP Edge
 
@@ -195,9 +202,17 @@ node -e $js
 **Purpose** — Move one pair of caches from "two unrelated caches" to
 "`Primary` ↔ `Secondary` linked pair". Combines:
 
-1. **Initiation** — Portal UI by default (`invokeGeoLinkUI`); ARM fallback (`invokeGeoLinkArm`) when UI is unavailable or unstable.
-2. **Convergence** — `waitGeoLink` polls each cache's `GET .../linkedServers` until every entry reports `provisioningState = Succeeded`.
-3. **Verification** — `assertGeoPair` enforces 1 entry per side and the correct peer `serverRole`.
+1. **Initiation** — Portal UI clicks only (`invokeGeoLinkUI` or equivalent
+  page-click sequence). Do not use ARM/CLI fallback to create the link.
+2. **Submission evidence** — after clicking the Portal flow, treat either of
+  these as a successful submission signal:
+  - the page navigates to `GeoReplicationLinkProperties`; or
+  - the primary cache Geo-replication blade lists the secondary cache with
+    `Link provisioning status` = `Creating` or `Syncing`.
+3. **Convergence** — poll the primary cache's Portal Geo-replication blade
+  list, not ARM, until the linked row shows `Succeeded`.
+4. **Verification** — verify the Portal list row shows the expected linked
+  cache, peer role, linked cache location, and final `Succeeded` status.
 
 **When to use**
 
@@ -222,11 +237,9 @@ node -e $js
 | `tenant` | no | Default `microsoft.onmicrosoft.com`. |
 | `screenshotPrefix` | no | Used for `*-submit.png`, `*-copied.png`. |
 
-`invokeGeoLinkArm({ primary, secondary, secondaryLocation, subscription, resourceGroup })` — `secondaryLocation` is the ARM-form location (e.g. `southeastasia`). Auto-retries with the pair reversed on 400.
-
-`waitGeoLink({ caches, subscription, resourceGroup, maxMinutes?, pollSec?, expectEmpty? })` — for linking: pass all caches in the run, keep `expectEmpty = false` (default), `maxMinutes = 60` is typically enough.
-
-`assertGeoPair({ primary, secondary, subscription, resourceGroup })` — returns `true` or throws. **`serverRole` on a `linkedServers` entry describes the PEER.**
+`waitGeoLink({ ... })` and `assertGeoPair({ ... })` may exist in helper code
+for diagnostics, but they must not replace Portal page-visible convergence and
+verification when the test requires page-click execution.
 
 **Helper invocation**
 
@@ -244,18 +257,28 @@ const { chromium } = require("playwright");
   const secondary = "ManualTestingGeo-SEA-1118";
   const sub = "<sub>", rg = "<rg>";
 
-  try {
-    await geo.invokeGeoLinkUI({ page, primary, secondary, subscription: sub, resourceGroup: rg });
-  } catch (e) {
-    console.log("UI link failed, falling back to ARM:", e.message);
-    await geo.invokeGeoLinkArm({ primary, secondary, secondaryLocation: "southeastasia", subscription: sub, resourceGroup: rg });
-  }
-  await geo.waitGeoLink({ caches: [primary, secondary], subscription: sub, resourceGroup: rg });
-  await geo.assertGeoPair({ primary, secondary, subscription: sub, resourceGroup: rg });
+  await geo.invokeGeoLinkUI({ page, primary, secondary, subscription: sub, resourceGroup: rg });
+  // Then poll the primary cache Geo-replication blade through Portal UI until
+  // the linked row shows Link provisioning status = Succeeded.
 })().catch(e => { console.error(e.message); process.exit(1); });
 '@
 node -e $js
 ```
+
+**Observed Portal behavior to preserve**
+
+- The final `Link` button may not be discoverable by a stable role selector in
+  every Portal build. If the helper reports a timeout on the `Link` selector,
+  do not immediately fail. First inspect the live page:
+  - if the URL contains `GeoReplicationLinkProperties`, the link submission has
+    likely succeeded;
+  - if the primary Geo-replication blade lists the secondary cache with status
+    `Creating` or `Syncing`, continue polling the Portal list page;
+  - fail only when no linked-cache evidence appears or the Portal shows an
+    explicit failure.
+- The most reliable convergence page is the primary cache Geo-replication list
+  blade. Reopen that blade and read the linked row instead of repeatedly
+  reloading the link detail page, which may temporarily omit the status text.
 
 **Pre-conditions**
 
@@ -276,8 +299,8 @@ node -e $js
 - **The picker row is a `gridcell`, not plain text.** `getByText(secondary)` collides with the Notifications flyout.
 - **`Link` button must use `exact: true`.** Multiple `Link`-labeled controls exist on the blade.
 - **Copy-to-clipboard tooltip is the only reliable evidence** of the link string — `navigator.clipboard.readText()` from Playwright is unreliable under Edge focus rules.
-- **`serverRole` describes the peer.** Query against `<primary>` returning `serverRole = Secondary` is correct (the peer IS secondary).
-- **ARM fallback may need the pair reversed** — `invokeGeoLinkArm` already retries with primary/secondary swapped on 400.
+- **`serverRole` describes the peer.** Portal row role on the primary side should show the linked cache as `Secondary`; on the secondary side it should show the linked cache as `Primary`.
+- **No ARM fallback for link creation.** If the Portal UI link flow is unstable, inspect page-visible submission evidence (`GeoReplicationLinkProperties`, `Creating`, `Syncing`) and continue from the Portal list blade. If there is no page-visible evidence, pause for manual Portal completion.
 
 ---
 
@@ -507,7 +530,7 @@ node -e $js
 - **Two-phase asynchrony**: clicking "Unlink" on side A drops A's entry first; B's entry transitions to `Deleting` only after control plane propagates. Budget ≥ 15 min.
 - **"Unlink" appears twice on the blade**: command-bar `Unlink caches` button + footer "Unlink" best-practices link. Use `getByRole("button", { name: "Unlink caches", exact: true })`.
 - **Confirm dialog is Yes/No** (same as failover; different from reboot).
-- **Auto mode silently falls back to ARM on UI failure** — by design, but log line `[geo] UI unlink failed, falling back to ARM: …` is the only signal. For mandatory UI evidence, force `mode: "UI"`.
+- **No ARM fallback for unlink.** If the Portal `Unlink caches` flow is unstable, pause for manual Portal completion and resume only after the Geo-replication blade shows no linked cache entry.
 - **Cleanup gate before delete**: Teardown calls `waitGeoLink({ expectEmpty: true })` internally, but calling Teardown immediately after a manual `invokeGeoUnlink` without `assertGeoUnlinked` may race `redis delete --no-wait` against a still-pending `linkedServers` entry (409).
 
 ---

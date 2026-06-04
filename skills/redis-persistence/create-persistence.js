@@ -128,6 +128,14 @@ function persistenceContainer(cache) {
   return `${cache.toLowerCase()}-redis-persistence`;
 }
 
+function redisConfigValue(config, ...names) {
+  if (!config) return undefined;
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(config, name)) return config[name];
+  }
+  return undefined;
+}
+
 // ── Helper: tolerant locator click ───────────────────────────────────────────
 async function clickByRole(page, role, options, { timeout = 8000, tolerate = false } = {}) {
   try {
@@ -437,17 +445,19 @@ async function waitPersistenceReady({
     const j = az(["redis", "show", "-g", resourceGroup, "-n", cache,
                   "--subscription", subscription, "-o", "json"], { json: true });
     const ps = j.provisioningState;
-    const rdb = j.redisConfiguration && j.redisConfiguration["rdb-backup-enabled"];
-    const aof = j.redisConfiguration && j.redisConfiguration["aof-backup-enabled"];
-    last = { ps, rdb, aof };
-    console.log(`[${nowHHMMSS()}] ${cache} provisioningState=${ps}  rdb=${rdb}  aof=${aof}`);
+    const config = j.redisConfiguration || {};
+    const rdb = redisConfigValue(config, "rdb-backup-enabled", "rdbBackupEnabled");
+    const aof = redisConfigValue(config, "aof-backup-enabled", "aofBackupEnabled");
+    const rdbFrequency = redisConfigValue(config, "rdb-backup-frequency", "rdbBackupFrequency");
+    last = { ps, rdb, aof, rdbFrequency };
+    console.log(`[${nowHHMMSS()}] ${cache} provisioningState=${ps}  rdb=${rdb}  aof=${aof}  rdbFrequency=${rdbFrequency || ""}`);
     if (ps === "Succeeded") break;
     if (Date.now() > deadline) throw new Error(`FAIL: timeout, provisioningState=${ps}`);
     await sleep(intervalSec * 1000);
   }
   if (mode === "AOF" && last.aof !== "true") throw new Error(`FAIL: aof-backup-enabled=${last.aof}`);
   if (mode === "RDB" && last.rdb !== "true") throw new Error(`FAIL: rdb-backup-enabled=${last.rdb}`);
-  console.log(`PASS: ${cache} provisioningState=Succeeded (rdb=${last.rdb}, aof=${last.aof})`);
+  console.log(`PASS: ${cache} provisioningState=Succeeded (rdb=${last.rdb}, aof=${last.aof}, rdbFrequency=${last.rdbFrequency || ""})`);
   return last;
 }
 

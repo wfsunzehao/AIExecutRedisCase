@@ -376,6 +376,14 @@ Fill fields in this exact order. **Order matters** — some fields reset others.
 
 6. **Premium-only settings** (skip for Basic/Standard):
    - Clustering: if required, enable and set shard count.
+         - **Premium Persistence AOF/RDB test convention:** for ADO-style
+            clustered + non-clustered persistence cases, create the clustered cache
+            as `Premium / P1` with `Clustering Enable = true` and `Shard count = 2`;
+            create the default/non-clustered cache as `Premium / P1` with
+            `Clustering Disabled`. Both caches must use `Public endpoint`,
+            `Non-TLS port Enabled`, `Microsoft Entra Authentication Disabled`, and
+            `Access Keys Authentication Enabled` so `redis-benchmark.exe` and
+            `redis-cli.exe` can validate port 6379 with access keys.
    - Replication: if required, set replica count. Fill shard count before replica count.
     - Geo-replication: if required, first ensure the user-confirmed topology from
        Phase 0 exists, including both the test cache region and the geo pair / linked-cache
@@ -457,6 +465,9 @@ Fill fields in this exact order. **Order matters** — some fields reset others.
    - `Non-TLS port` = `Enabled` (when required)
    - `Microsoft Entra Authentication` = `Disabled`
    - `Access Keys Authentication` = `Enabled`
+    - `Clustering` = `Enabled` and `Shard count` = requested value for clustered
+       persistence tests, or `Clustering Disabled` for default/non-clustered
+       persistence tests
    If Review still shows `Access Keys Authentication Disabled`, return to Advanced and re-apply the toggle
    using the duplicate-instance guard above.
 
@@ -493,6 +504,23 @@ Fill fields in this exact order. **Order matters** — some fields reset others.
    If any field differs from the target configuration, go back and correct it.
 
 5. **Click "Create"** to start deployment. Note the timestamp.
+
+   **Portal Create command fallback (mandatory):** the Review page's `Create`
+   command is not always exposed as a normal `button:has-text("Create")`.
+   If the regular button locator does not become clickable after validation
+   passes, do not switch to CLI/ARM creation. Instead:
+   1. Confirm the page text shows `Validation passed.` and the Review summary
+      still matches the target configuration.
+   2. Find a visible Portal command/text node whose normalized text is exactly
+      `Create` or whose accessible label is `Create`.
+   3. Scroll that visible element into view, read its bounding box, and click
+      the center point with `page.mouse.click(x, y)`.
+   4. Verify submission by visible Portal evidence such as
+      `Submitting deployment...`, `Deployment in progress`, or navigation to a
+      `DeploymentDetails` blade.
+   5. If the fallback click cannot find or submit the visible command, pause and
+      ask the user to click **Create** manually in the Portal, then resume only
+      after deployment evidence is visible.
 
 ---
 
@@ -702,7 +730,8 @@ Apply this guard whenever a test case requires creating multiple cache resources
 | Hidden duplicate toggle guard | If both hidden and visible elements share the same toggle `aria-label`, state readback and click target must use the visible instance only. A hidden instance at `y=0` or out-of-viewport can incorrectly report `true` while the visible control remains `false`, which causes Review to show `Access Keys Authentication Disabled`. |
 | Toggle six-step procedure | Every aria-label checkbox interaction on the Advanced tab (Non-TLS, Entra Auth, Access Keys, Clustering) must follow this exact order: (1) `querySelectorAll` not `querySelector`; (2) filter to visible-in-viewport instance; (3) `scrollIntoView({block:'center'})` + 200 ms + re-read rect; (4) `page.mouse.click(cx, cy)` if `0 < y < innerHeight`, else `visibleEl.click()` via `evaluate` on the **visible** instance; (5) re-read `aria-checked` on the visible instance; (6) `dismissOverlays` (Escape×4) before navigating away. Use `setToggle()` from `create-cache.js` — it encodes all six steps. |
 | Auth toggle activation order | When initial state is `Entra=ON` and `Access Keys=OFF` and the target state is `Entra=OFF` and `Access Keys=ON`, enable Access Keys **first**, then disable Entra. The portal blocks any transition that would leave zero auth methods enabled; reversing this order silently no-ops on the Entra click and the Advanced tab ends with `Keys=OFF, Entra=ON`. |
-| Footer / tab navigation click | Footer and tab buttons (`Next : Tags >`, `Next : Review + create >`, `Create`, `Advanced`, `Review + create`) must be clicked via DOM `.click()` through `clickFooterByText()` — never `page.mouse.click(x, y)`. When the create blade is scrolled, these buttons frequently have `rect.y ≤ 0` and a coordinate click hits the top header / waffle menu instead. Always call `dismissOverlays(page)` (Escape×4) immediately before the click to clear any open dropdown or notification overlay. |
+| Footer / tab navigation click | Footer and tab buttons (`Next : Tags >`, `Next : Review + create >`, `Advanced`, `Review + create`) must be clicked via DOM `.click()` through `clickFooterByText()` — never `page.mouse.click(x, y)`. When the create blade is scrolled, these buttons frequently have `rect.y ≤ 0` and a coordinate click hits the top header / waffle menu instead. Always call `dismissOverlays(page)` (Escape×4) immediately before the click to clear any open dropdown or notification overlay. The Review page `Create` command is the exception; use the dedicated row below. |
+| Review Create command | After `Validation passed.`, the `Create` command may be rendered as Portal command text rather than a standard button. If `button:has-text("Create")` hangs or is absent, locate the visible element with exact normalized text or aria-label `Create`, click its bounding-box center, and verify `Submitting deployment...`, `Deployment in progress`, or `DeploymentDetails`. Do not use CLI/ARM creation as fallback; pause for manual Portal click if needed. |
 | Re-ensure Advanced before edit | Any Advanced-tab edit performed after a correction loop (e.g. the page may be on Review or Tags) must be preceded by `ensureAdvancedTab(page)`, which DOM-clicks the `[role=tab]` with text `"Advanced"`. Calling Playwright locator clicks on Advanced controls while another tab is active throws "element is not visible". |
 | Bounding rect y=0 guard | Before calling `page.mouse.click(x, y)`, always verify `rect.y > 0 && rect.y < window.innerHeight`. A `y` value of 0 (or very small) means the element exists in the DOM but is scrolled out of the viewport — clicking at y=0 hits the browser chrome (e.g. the hamburger/portal menu) instead of the intended element. Recovery: inside `page.evaluate()` call `element.scrollIntoView({ block: "center", behavior: "instant" })`, wait 200 ms, then re-query `getBoundingClientRect()`. If still out of range, find and scroll the nearest `overflowY: auto/scroll` ancestor container explicitly. |
 | Auth blade sidebar navigation | The Authentication sub-blade of a cache resource must be reached by clicking the **"Authentication" nav item in the left sidebar** (Settings group) — **not** by `page.goto(authUrl)`. The portal SPA does not process sub-blade hash fragments from `goto()`; navigating to an auth-blade URL always renders the Overview blade instead. Sidebar click sequence: (1) find nav item with trimmed text `"Authentication"` via `querySelectorAll` or TreeWalker, (2) apply `y > 0 && y < window.innerHeight` guard — scroll sidebar if out of range, (3) click via `page.mouse.click(x, y)`. **CLI fallback** when sidebar navigation fails: `az redis show --query "{dak:disableAccessKeyAuthentication,aad:redisConfiguration.aadEnabled}"` — `dak=false` → Access Keys ON; `aad=null` → Entra OFF. |

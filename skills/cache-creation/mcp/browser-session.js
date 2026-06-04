@@ -196,14 +196,15 @@ async function readPageText(options = {}) {
   const frames = [];
   for (const frame of page.frames()) {
     const text = await frame.evaluate(() => document.body?.innerText || "").catch(() => "");
-    if (text.trim()) frames.push({ url: frame.url(), text });
+    const url = typeof frame.url === "function" ? frame.url() : frame.url;
+    if (text.trim()) frames.push({ url, text });
   }
   const combined = frames.map(frame => frame.text).join("\n\n--- frame ---\n\n");
   return {
     url: page.url(),
     text: combined.slice(0, maxChars),
     truncated: combined.length > maxChars,
-    frames: frames.map(frame => ({ url: frame.url(), textLength: frame.text.length })),
+    frames: frames.map(frame => ({ url: frame.url, textLength: frame.text.length })),
   };
 }
 

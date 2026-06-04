@@ -424,10 +424,24 @@ sections — emit empty arrays where applicable.
   may run.
 - Stop on the first hard failure; report the failed skill + the dependency
   it blocks.
-- UI path is preferred for every skill that exposes one (per repo default:
-  CDP Edge on `127.0.0.1:9222` + `playwright-cli attach`).
-- ARM/CLI fallback is allowed **inside** an Atomic Skill, but the
-  orchestrator does not swap a skill for raw ARM calls.
+- Portal page-click execution is mandatory for Azure resource operations.
+  Create, configure, link, unlink, fail over, reboot, scale, delete, and any
+  equivalent management-plane action MUST be completed through visible Azure
+  Portal page clicks in the live CDP browser session.
+- Do NOT use ARM, Azure CLI, REST, SDK calls, `az redis`, `az resource`, or any
+  management-plane CLI/API fallback to perform Azure resource operations, even
+  when an Atomic Skill exposes such a fallback path.
+- Azure CLI / ARM boundary: CLI or ARM may not be used as the action path or
+  the primary pass signal for management-plane work. For Azure resource state,
+  prefer Portal-visible evidence. If a test requires data-plane validation
+  values such as host name or access key, obtain them through the Portal when
+  practical; use read-only CLI only with explicit user permission and record it
+  as evidence collection, not as resource-operation execution.
+- If a required Portal page-click cannot be completed reliably, pause and ask
+  the user to complete the specific Portal action manually. Resume only after
+  the user confirms the page-visible state.
+- UI path is the only allowed execution path for every Azure Portal skill (per
+  repo default: CDP Edge on `127.0.0.1:9222` + `playwright-cli attach`).
 - Long-running waits MUST follow the repo default: `sync` + large timeout
   + Wait-script that emits progress every 60–180s. Never `mode=async` for
   LROs.
@@ -448,10 +462,10 @@ original Test Case step (role, DBSIZE, blade state, notification text).
 
 Priority recap:
 1. Atomic Skill (UI path)
-2. Atomic Skill (ARM/CLI fallback inside the skill)
-3. Manual UI Fallback (portal-console + playwright-cli)
+2. Manual UI Fallback (portal-console + playwright-cli)
 
-Never invent a 4th path (e.g. ad-hoc REST calls from the orchestrator).
+Never invent another path (e.g. ARM, Azure CLI, REST, SDK calls, or ad-hoc
+management-plane scripts from the orchestrator).
 
 ---
 
