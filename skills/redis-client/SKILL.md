@@ -20,11 +20,13 @@ project-local benchmark executable from the same directory.
 
 This skill is the authoritative runbook for Redis client execution. It owns the
 choice of executable, command order, inputs, cleanup, result reporting, and
-secret handling. The JavaScript file named redis-client-assertions.js in this
-skill folder is assertion-only: it validates captured process status, stdout,
-stderr, expected command output, expected error output, and benchmark metrics.
-It must not launch redis-cli, launch redis-benchmark, choose executable paths,
-read Redis credentials, or create result artifacts.
+secret handling. The JavaScript file named redis-data-plane.js contains reusable
+execution helpers for redis-cli, redis-benchmark, pair health checks, role
+parsing, and secret-redacted errors. The JavaScript file named
+redis-client-assertions.js is assertion-only: it validates captured process
+status, stdout, stderr, expected command output, expected error output, and
+benchmark metrics. It must not launch redis-cli, launch redis-benchmark, choose
+executable paths, read Redis credentials, or create result artifacts.
 
 Validation must be performed by JavaScript assertions. Do not rely only on a
 printed command line, terminal transcript, or process exit code.
@@ -74,9 +76,11 @@ strings in scripts, logs, screenshots, or result files.
 ## Safety And Execution Rules
 
 1. Use Redis client executables from the current repository only.
-2. Execute redis-cli and redis-benchmark according to this skill. Do not delegate
-   command execution, executable selection, authentication handling, cleanup, or
-   result-file writing to redis-client-assertions.js.
+2. Execute redis-cli and redis-benchmark according to this skill. Reuse
+  redis-data-plane.js for common command execution and benchmark helpers when
+  useful. Do not delegate command execution, executable selection,
+  authentication handling, cleanup, or result-file writing to
+  redis-client-assertions.js.
 3. Use redis-client-assertions.js only for JavaScript assertions over captured
    process records and benchmark output.
 4. Do not add JavaScript snippets, shell snippets, or per-test code blocks to this
@@ -123,6 +127,21 @@ and benchmark output:
 7. If the case specifies a minimum throughput threshold, parse the metric and
   assert it is greater than or equal to that threshold. Do not invent a threshold
   when the case does not specify one.
+
+## Execution Helper
+
+Use redis-data-plane.js when a test needs reusable, non-Portal Redis data-plane
+operations:
+
+- `redisCliCommand({ host/cache, key, port?, args })`
+- `validateRedisPair({ primary, secondary, primaryKey, secondaryKey, expectedPrimaryRole?, expectedSecondaryRole?, checkRoles?, expectDbsizeMatch? })`
+- `runRedisBenchmark({ cache/host, key, port?, benchmarkCount?, keyRange?, tests?, pipeline?, quiet? })`
+- `waitForRedisPairHealthy(options)`
+
+The helper may execute Redis clients and parse Redis output, but it does not own
+test-case sequencing, cleanup policy, result-file writes, or expected-output
+decisions. Provide secrets through environment variables or in-memory values and
+never print returned keys or command lines containing `-a` values.
 
 ## Assertion Script
 

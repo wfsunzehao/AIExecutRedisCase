@@ -1,6 +1,7 @@
 {
   "scripts": {
     "redis:cli": ".\\tools\\redis-client\\redis-cli.exe",
+    "geo:data-plane": "node skills/geo-replication-setup/geo-data-plane.js",
     "mcp:cache-creation": "node skills/cache-creation/mcp/server.js",
     "mcp:geo-replication-setup": "node skills/geo-replication-setup/mcp/server.js"
   },

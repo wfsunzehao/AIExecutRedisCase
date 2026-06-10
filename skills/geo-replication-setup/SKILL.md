@@ -30,13 +30,13 @@ applyTo: "**"
 
 | # | Capability | Anchor | Helper(s) in [create-geo.js](create-geo.js) |
 |---|---|---|---|
-| 1 | Prereq | [#capability-1-geo-prereq](#capability-1-geo-prereq) | `assertGeoEnv` |
-| 3 | Link | [#capability-3-geo-link](#capability-3-geo-link) | `invokeGeoLinkUI`, Portal list-blade polling, Portal row verification |
-| 4 | Failover | [#capability-4-geo-failover](#capability-4-geo-failover) | `invokeGeoFailover`, `assertGeoRoleFlip`, `testGeoActivityLog` |
-| 5 | Reboot-then-failover | [#capability-5-geo-reboot-failover](#capability-5-geo-reboot-failover) | `invokeRebootThenFailover`, `assertConcurrentNotifications` |
-| 6 | Unlink | [#capability-6-geo-unlink](#capability-6-geo-unlink) | `invokeGeoUnlink`, `assertGeoUnlinked` |
-| 7 | DNS verify | [#capability-7-geo-dns-verify](#capability-7-geo-dns-verify) | `testGeoDns` |
-| 8 | Teardown | [#capability-8-geo-teardown](#capability-8-geo-teardown) | `invokeGeoTeardown` |
+| 1 | Prereq | `#capability-1-geo-prereq` | `assertGeoEnv` |
+| 3 | Link | `#capability-3-geo-link` | `invokeGeoLinkUI`, Portal list-blade polling, Portal row verification |
+| 4 | Failover | `#capability-4-geo-failover` | `invokeGeoFailover`, `assertGeoRoleFlip`, `testGeoActivityLog` |
+| 5 | Reboot / Reboot-then-failover | `#capability-5-geo-reboot-failover` | `connectCdpPortalPage`, `openRedisBlade`, `copyRedisAccessKeyFromPortal`, `selectRebootPorts`, `invokeRedisReboot`, `invokeRebootThenFailover`, `assertConcurrentNotifications` |
+| 6 | Unlink | `#capability-6-geo-unlink` | `invokeGeoUnlink`, `assertGeoUnlinked` |
+| 7 | DNS verify | `#capability-7-geo-dns-verify` | `testGeoDns` |
+| 8 | Teardown | `#capability-8-geo-teardown` | `invokeGeoTeardown` |
 
 > Slot 2 (Provision) is intentionally vacant. Cache creation now lives in the
 > [`cache-creation`](../cache-creation/SKILL.md) skill; existing anchors are
@@ -44,6 +44,12 @@ applyTo: "**"
 
 A capability is **atomic**: it advances exactly one piece of geo state, returns
 a verifiable signal, and never assumes which capability comes next.
+
+Generic Azure Portal Redis mechanics such as CDP attachment, Redis resource
+blade navigation, visible-text click fallbacks, Access Keys copy, and isolated
+Redis reboot live in the shared [../redis-portal/SKILL.md](../redis-portal/SKILL.md)
+helper library. This Geo skill composes those primitives; it should not grow
+test-case-specific copies of generic Portal helpers.
 
 ---
 
@@ -60,16 +66,12 @@ section instead of restating its content.
   ```powershell
   $js = @'
   const geo = require("d:/junru/skills/geo-replication-setup/create-geo.js");
-  const { chromium } = require("playwright");
   (async () => {
     // Environment checks only; do not use ARM/CLI for Geo operations.
     await geo.assertGeoEnv({ subscription, resourceGroup });
 
     // Geo operations must be completed through visible Portal UI clicks.
-    const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
-    const ctx = browser.contexts()[0];
-    const page = ctx.pages().find(p => new URL(p.url()).hostname === "ms.portal.azure.com")
-              || await ctx.newPage();
+    const { page } = await geo.connectCdpPortalPage();
     await geo.invokeGeoLinkUI({ page, primary, secondary, subscription, resourceGroup });
   })().catch(e => { console.error(e.message); process.exit(1); });
   '@
@@ -77,7 +79,9 @@ section instead of restating its content.
   ```
 
 - **Never create per-capability `.js` files** in `%TEMP%` or the workspace. Use the `$js = @'…'@; node -e $js` here-string pattern.
-- **Never call** `browser.disconnect()` or `browser.close()` after `connectOverCDP` — that would kill the real Edge. Let the Node process exit.
+- Use `connectCdpPortalPage({ cdpEndpoint?, viewport? })` to attach to the live Portal page instead of repeating `connectOverCDP` boilerplate. It returns `{ browser, context, page }` and sets a stable viewport by default.
+- For non-Geo Redis Portal tasks, import [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) directly. [create-geo.js](create-geo.js) re-exports the same generic helpers only to keep existing Geo snippets compatible.
+- **Never call** `browser.disconnect()` or `browser.close()` after `connectOverCDP` / `connectCdpPortalPage` — that would kill the real Edge. Let the Node process exit.
 - **Portal page-click only for Geo operations.** Link, unlink, failover,
   reboot, teardown, and any equivalent management-plane action MUST be
   initiated by visible Azure Portal clicks in the live CDP browser session.
@@ -163,6 +167,32 @@ dependencies that every downstream capability assumes already true.
 | `cdpPort` | number | no | `9222` | TCP port for `chromium.connectOverCDP`. |
 
 **Helper invocation**
+
+Isolated all-port reboot:
+
+```powershell
+$js = @'
+const geo = require("d:/junru/skills/geo-replication-setup/create-geo.js");
+const { chromium } = require("playwright");
+(async () => {
+  const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
+  const ctx = browser.contexts()[0];
+  const page = ctx.pages().find(p => new URL(p.url()).hostname === "ms.portal.azure.com")
+            || await ctx.newPage();
+
+  await geo.invokeRedisReboot({
+    page,
+    cache: "ManualTestingGeo-CUSE-1118",
+    subscription: "<sub>",
+    resourceGroup: "<rg>",
+    allPorts: true
+  });
+})().catch(e => { console.error(e.message); process.exit(1); });
+'@
+node -e $js
+```
+
+Concurrent reboot + failover:
 
 ```powershell
 $js = @'
@@ -388,12 +418,17 @@ node -e $js
 the Primary and a Failover is submitted on the Secondary within ≤ 2 s. Capture
 the Notifications flyout showing both operations in flight.
 
+Also covers the reusable Redis reboot primitive used by geo workflows. Unless
+the test case explicitly names a single port, Redis reboot operations must use
+all visible cache ports in the Portal Reboot blade.
+
 **When to use** — specifically for ADO 16021140 and variants requiring concurrent reboot + failover.
 
 **When NOT to use**
 
 - Clean failover — use Failover.
-- Reboot in isolation (out of scope).
+- Non-geo cache reboot workflows — use the same helper only when the test is
+  explicitly Redis reboot validation; otherwise route to the owning skill.
 
 **Inputs**
 
@@ -406,21 +441,58 @@ the Notifications flyout showing both operations in flight.
 | `secondary` | yes | Current Geo-Secondary — receives the failover. |
 | `subscription`, `resourceGroup` | yes | — |
 
+`selectRebootPorts({ page, allPorts?, ports?, screenshotPath? })` — opens the
+Portal `Port(s) to reboot` multi-select and selects either all visible Redis
+ports (`allPorts: true`) or the exact `ports` list. For current Premium geo
+caches this means `Primary - 15001` and `Replica - 15000`. The helper verifies
+the blade visibly shows the selected count (for example `2 selected`) and all
+selected port names before returning.
+
+`invokeRedisReboot({ page, cache, subscription, resourceGroup, tenant?, allPorts?, ports?, screenshotPrefix? })`
+— opens the cache's Portal Reboot blade, selects all ports by default, clicks
+`Reboot`, confirms with `OK`, and captures port-selection plus notification
+screenshots. This helper performs a Portal UI reboot only; it never uses ARM,
+CLI, REST, or SDK management-plane calls.
+
+`copyRedisAccessKeyFromPortal({ page, cache, subscription, resourceGroup, tenant?, keyLabel?, screenshotPrefix? })`
+— opens the cache Overview, opens the right-side access keys pane, reveals keys
+when required, copies the requested key label (default `Primary key`) into
+process memory via the Windows clipboard, and logs only key length. This is a
+generic helper from [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js);
+use it for data-plane validation setup when explicit test keys are not provided.
+
 Returns `{ rebootAt, failoverAt, deltaSec }`. **`deltaSec ≤ 2` is the spec.**
 
 `assertConcurrentNotifications({ page, screenshotPath? })` — opens the Notifications flyout and waits for both `Rebooting cache` and `Submitting failover request` to be visible (5 s each). Writes screenshot at `screenshotPath` (auto-named if omitted).
 
 **Helper invocation**
 
+Isolated all-port reboot:
+
 ```powershell
 $js = @'
 const geo = require("d:/junru/skills/geo-replication-setup/create-geo.js");
-const { chromium } = require("playwright");
 (async () => {
-  const browser = await chromium.connectOverCDP("http://127.0.0.1:9222");
-  const ctx = browser.contexts()[0];
-  const page = ctx.pages().find(p => new URL(p.url()).hostname === "ms.portal.azure.com")
-            || await ctx.newPage();
+  const { page } = await geo.connectCdpPortalPage();
+  await geo.invokeRedisReboot({
+    page,
+    cache: "ManualTestingGeo-CUSE-1118",
+    subscription: "<sub>",
+    resourceGroup: "<rg>",
+    allPorts: true
+  });
+})().catch(e => { console.error(e.message); process.exit(1); });
+'@
+node -e $js
+```
+
+Concurrent reboot + failover:
+
+```powershell
+$js = @'
+const geo = require("d:/junru/skills/geo-replication-setup/create-geo.js");
+(async () => {
+  const { page } = await geo.connectCdpPortalPage();
 
   const primary   = "ManualTestingGeo-CUSE-1118";
   const secondary = "ManualTestingGeo-WCUS-1118";
@@ -453,11 +525,46 @@ node -e $js
 **Pitfalls**
 
 - **Port combobox options are `treeitem`, NOT `option`.** `getByRole("option", …)` will time out.
+- **All-port reboot is a multi-select.** Do not submit while the blade shows
+  only `Replica - 15000`. For all-port reboot, verify `2 selected` plus
+  `Primary - 15001` and `Replica - 15000` before clicking `Reboot`.
+- **Do not hard-code `Replica - 15001`.** In the observed Portal blade,
+  `15001` is the Primary port and `15000` is the Replica port.
 - **Reboot confirm dialog uses OK/Cancel; failover uses Yes/No.** Both happen in the same script — do not generalize.
 - **No artificial waits between Reboot OK and Failover Yes.** Adding `waitForTimeout` or `closeNotificationsFlyout` between them blows the ≤ 2 s budget.
 - **Run from a freshly-loaded Portal session.** A cluttered pre-existing Notifications flyout can intercept the Failover button on the secondary; helper closes it once but extra noise still adds latency.
 - **`primary` receives reboot, `secondary` receives failover.** Swapping them produces a meaningless test.
 - **Run `assertConcurrentNotifications` immediately** after `invokeRebootThenFailover` returns — the Rebooting cache toast disappears in ~60–180 s.
+- **Access Keys opens as a right-side context pane.** Close any stale
+  `CacheKeys` pane before navigating to Overview, then open `Show access
+  keys...`. The helper uses a clipboard marker and returns the key in memory;
+  do not print the returned key.
+
+### Data-plane verification helper
+
+Use [geo-data-plane.js](geo-data-plane.js) for repeatable Redis validation
+after link, benchmark, reboot, failover, or relink. It is a thin Geo-default
+wrapper over the generic [../redis-client/redis-data-plane.js](../redis-client/redis-data-plane.js)
+helper. Keys are read from environment variables and are never printed; logs
+include key lengths only.
+
+```powershell
+$env:REDIS_PRIMARY_KEY = "<primary-key>"
+$env:REDIS_SECONDARY_KEY = "<secondary-key>"
+node skills/geo-replication-setup/geo-data-plane.js --primary "<primary-cache>" --secondary "<secondary-cache>" --benchmark --wait
+```
+
+Validation checks:
+
+- `PING` returns `PONG` on both endpoints.
+- `DBSIZE` matches on primary and secondary.
+- `INFO replication` reports primary `role:master` and secondary `role:slave`.
+- `INFO replication` must be passed to `redis-cli` as two arguments (`INFO`,
+  `replication`), not one combined string.
+- For non-Geo or post-role-swap checks, call the generic Redis data-plane helper
+  directly or pass `--expected-primary-role`, `--expected-secondary-role`,
+  `--skip-role`, or `--no-dbsize-match` when the scenario requires different
+  expectations.
 
 ---
 

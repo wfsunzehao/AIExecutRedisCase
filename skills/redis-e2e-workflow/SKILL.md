@@ -48,6 +48,8 @@ Workflow Construction (dynamic compose from Feature Mapping) ◄─────�
 Missing Skill Detection
    ↓
 Atomic Skill Loading (lazy, plan-only)
+  ↓
+JS Helper Routing
    ↓
 Atomic Skill Execution (+ Manual UI Fallback if uncovered)
    ↓
@@ -149,11 +151,17 @@ Required Skills:
 - portal-validation
 
 ### S3. Geo Reboot + Failover
-Trigger: "reboot Geo Primary", "reboot then failover", "reboot replica then failover"
+Trigger: "reboot Geo Primary", "reboot then failover", "reboot replica then failover", "reboot all ports"
 Required Skills:
 - geo-replication-setup
 - portal-validation
 - azure-portal-reliability
+Execution note:
+- When the test case or user asks to reboot a cache in a geo flow, reboot all
+  cache ports unless the test step explicitly names a single port. In the
+  Portal Reboot blade, select both `Primary - 15001` and `Replica - 15000` and
+  record visible pre-submit evidence such as `2 selected` plus both option
+  names before clicking `Reboot`.
 
 ### S4. Geo + Scale Validation
 Trigger: "scale to P2 then link", "scale both caches then geo"
@@ -380,6 +388,98 @@ Atomic Skills.
 
 ---
 
+## Phase 8.5 — JS Helper Routing (MANDATORY before execution)
+
+Before running any `node -e`, Playwright, redis-cli, or benchmark command, the
+orchestrator MUST create a helper routing plan. The goal is to call existing
+repository helpers instead of writing ad-hoc per-test scripts.
+
+### Helper Selection Matrix
+
+| Test action / operation | Preferred JS helper | Owning skill | Notes |
+|---|---|---|---|
+| Connect to Edge/Chrome CDP, reuse Portal page, set viewport | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `connectCdpPortalPage` | `redis-portal` | Use for every Portal-driven Redis test. |
+| Build/open an Azure Portal resource blade URL | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `portalResourceUrl`, `openPortalResourceBlade` | `redis-portal` | Generic for any Azure resource blade. |
+| Build/open an Azure Cache for Redis blade | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `portalRedisUrl`, `openRedisBlade` | `redis-portal` | Use `blade` to choose Overview, Reboot, Geo, Import, Export, etc. |
+| Click unstable Portal controls by visible text | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `clickVisibleTextElement` | `redis-portal` | Use only after stable role locators are unreliable. |
+| Click Portal controls by role or text | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `clickByRole`, `clickByText` | `redis-portal` | Shared tolerant Playwright wrappers for feature helpers. |
+| Wait for Portal visible text | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `waitForVisibleText` | `redis-portal` | Use for notification/text evidence checks. |
+| Capture Portal screenshot evidence | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `captureScreenshot` | `redis-portal` | Use instead of raw `page.screenshot` in feature helpers. |
+| Close Notifications or right-side context pane | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `closeNotificationsFlyout`, `closeContentPane` | `redis-portal` | Prevent overlays from intercepting clicks. |
+| Copy Redis Access Keys from Portal | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `copyRedisAccessKeyFromPortal` | `redis-portal` | Do not print keys; log length only. |
+| Submit Redis Reboot from Portal | [../redis-portal/portal-redis-helpers.js](../redis-portal/portal-redis-helpers.js) `selectRebootPorts`, `invokeRedisReboot` | `redis-portal` | Generic Redis reboot; not Geo-specific. |
+| Run Redis PING/DBSIZE/INFO or one-off redis-cli commands | [../redis-client/redis-data-plane.js](../redis-client/redis-data-plane.js) `redisCliCommand` | `redis-client` | Pass `INFO` and `replication` as separate args. |
+| Validate two Redis endpoints / roles / DBSIZE | [../redis-client/redis-data-plane.js](../redis-client/redis-data-plane.js) `validateRedisPair`, `waitForRedisPairHealthy` | `redis-client` | Configure expected roles per scenario. |
+| Run redis-benchmark | [../redis-client/redis-data-plane.js](../redis-client/redis-data-plane.js) `runRedisBenchmark` | `redis-client` | Keep secrets in env/in-memory values. |
+| Geo link / failover / unlink / DNS / role flip | [../geo-replication-setup/create-geo.js](../geo-replication-setup/create-geo.js) | `geo-replication-setup` | Only Geo semantics belong here. |
+| Geo default data-plane check | [../geo-replication-setup/geo-data-plane.js](../geo-replication-setup/geo-data-plane.js) | `geo-replication-setup` | Wrapper with primary=`master`, secondary=`slave` defaults. |
+| Redis command output assertions | [../redis-client/redis-client-assertions.js](../redis-client/redis-client-assertions.js) | `redis-client` | Assertion-only; never executes Redis clients. |
+
+### Helper Routing Rules
+
+1. For every execution step, choose the owning Atomic Skill first, then choose
+  the smallest exported helper that performs the action.
+2. If a reusable helper exists in the matrix, the orchestrator MUST call it;
+  it must not reimplement the same DOM search, redis-cli invocation, benchmark
+  invocation, or URL builder in an ad-hoc snippet.
+3. Generic Portal Redis mechanics belong to `redis-portal`, even when the test
+  scenario is Geo, import/export, persistence, firewall, or validation.
+4. New or modified feature helpers must avoid raw `page.goto`,
+  `page.getByRole`, `page.getByText`, and `page.screenshot` for generic
+  Portal actions. Use `redis-portal` wrappers instead, keeping raw Playwright
+  only for truly feature-specific form interactions that do not have a shared
+  helper yet.
+5. Generic Redis data-plane mechanics belong to `redis-client`; Geo-specific
+  wrappers may provide defaults but must not be the only reusable path.
+6. Scenario-specific JS files may compose shared helpers, but must not hard-code
+  cache names, subscription IDs, regions, test-case IDs, or one-run artifacts
+  inside exported helper functions.
+7. If no helper covers a repeated action, add or extend the helper under the
+  owning skill before creating a temporary test-case script. Temporary scripts
+  are allowed only for one-off evidence gathering and must not become the
+  default execution path.
+8. If a helper would require a secret, pass the secret through environment
+  variables or process memory. Never print, persist, or paste access keys,
+  passwords, tokens, or connection strings.
+
+### Standard Composition Template
+
+Use this shape for multi-helper orchestration. The `node -e` layer owns the
+test-case variables and sequence; helper modules own reusable actions.
+
+```powershell
+$js = @'
+const portal = require("./skills/redis-portal/portal-redis-helpers.js");
+const redis = require("./skills/redis-client/redis-data-plane.js");
+const geo = require("./skills/geo-replication-setup/create-geo.js");
+
+(async () => {
+  const subscription = "<subscription-id>";
+  const resourceGroup = "<resource-group>";
+  const cache = "<cache-name>";
+
+  const { page } = await portal.connectCdpPortalPage();
+  await portal.openRedisBlade({ page, cache, subscription, resourceGroup, blade: "overview" });
+
+  const body = await portal.visibleBodyText(page);
+  console.log(body.slice(0, 500));
+})().catch(e => { console.error(e.message); process.exit(1); });
+'@
+node -e $js
+```
+
+### Helper Routing Plan Output
+
+Before execution, emit the selected helper plan in the Discovery Summary:
+
+```
+Helper Routing Plan:
+  Step 1: <test step> -> <skill> -> <js file> -> <exported helper(s)>
+  Step 2: <test step> -> <skill> -> <js file> -> <exported helper(s)>
+```
+
+---
+
 ## Phase 9 — Discovery Summary (mandatory output, upgraded format)
 
 The orchestrator MUST emit this block **before any execution tool call**:
@@ -409,6 +509,9 @@ Missing Skills:
 Execution Plan:
   skillA → skillB → skillC
 
+Helper Routing Plan:
+  [step -> skill -> js file -> exported helper(s), ...]
+
 Validation Plan:
   [built-in asserts per skill] + [portal-validation: ...] + [azure-portal-reliability: ...]
 ```
@@ -422,6 +525,13 @@ sections — emit empty arrays where applicable.
 
 - Execute strictly in the constructed plan order. No skill outside the plan
   may run.
+- Execute through the Helper Routing Plan from Phase 8.5. Before writing any
+  inline Playwright DOM logic, redis-cli command wrapper, benchmark wrapper, or
+  Portal URL builder, check the helper matrix and use the existing exported
+  helper when available.
+- `node -e` snippets are orchestration layers only: they may define test-case
+  variables and call helpers, but they must not duplicate helper internals or
+  hide scenario-specific constants inside reusable modules.
 - Stop on the first hard failure; report the failed skill + the dependency
   it blocks.
 - Portal page-click execution is mandatory for Azure resource operations.
@@ -440,8 +550,23 @@ sections — emit empty arrays where applicable.
 - If a required Portal page-click cannot be completed reliably, pause and ask
   the user to complete the specific Portal action manually. Resume only after
   the user confirms the page-visible state.
+- Redis cache reboot operations MUST use the Portal Reboot blade. When the
+  requested reboot scope is "all ports" or unspecified in a geo workflow,
+  open the `Port(s) to reboot` selector and select both `Primary - 15001` and all replica ports such as
+  `Replica - 15000`; verify the blade visibly shows `2 selected` and both port
+  names before submitting. Do not submit while only one port is selected unless
+  the test step explicitly requires that single port.
+- Every execution MUST start a fresh Microsoft Edge instance with remote
+  debugging enabled on the CDP port (`127.0.0.1:9222` by default), using an
+  independent `--user-data-dir`, and then drive Azure Portal with Playwright
+  attached to that CDP session.
+- If Microsoft Edge cannot be started or Playwright cannot attach to its CDP
+  endpoint, fall back to a fresh Google Chrome instance with the same CDP port,
+  independent `--user-data-dir`, and Playwright attach flow. Record the Edge
+  failure reason before using Chrome.
 - UI path is the only allowed execution path for every Azure Portal skill (per
-  repo default: CDP Edge on `127.0.0.1:9222` + `playwright-cli attach`).
+  repo default: fresh CDP Edge on `127.0.0.1:9222` + `playwright-cli attach`,
+  with Chrome fallback only when Edge is unavailable).
 - Long-running waits MUST follow the repo default: `sync` + large timeout
   + Wait-script that emits progress every 60–180s. Never `mode=async` for
   LROs.
@@ -453,9 +578,11 @@ sections — emit empty arrays where applicable.
 Use **only** for items flagged by Missing Skill Detection (Phase 7) with
 fallback = Manual UI, or when an Atomic Skill's UI path is provably broken.
 
-Tooling: `portal-console` + `playwright-cli` (CDP attach on
-`http://127.0.0.1:9222`, independent `--user-data-dir`, literal
-`127.0.0.1` — never `localhost`).
+Tooling: `portal-console` + `playwright-cli` attached to a fresh CDP browser
+session. Prefer Microsoft Edge on `http://127.0.0.1:9222` with an independent
+`--user-data-dir`; if Edge is unavailable, use Google Chrome on the same CDP
+endpoint and record the Edge failure. Always use literal `127.0.0.1` — never
+`localhost`.
 
 Contract: the fallback step MUST preserve the same pass/fail signal as the
 original Test Case step (role, DBSIZE, blade state, notification text).

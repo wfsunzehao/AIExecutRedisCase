@@ -31,6 +31,7 @@ const { spawnSync } = require("child_process");
 const https = require("https");
 const dns = require("dns");
 const net = require("net");
+const redisPortal = require("../redis-portal/portal-redis-helpers");
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const AZ_CMD =
@@ -54,7 +55,7 @@ const REGION_DISPLAY = {
 
 // ── Helper: az CLI wrapper ───────────────────────────────────────────────────
 function az(args, { quiet = false, json = false } = {}) {
-  const r = spawnSync(AZ_CMD, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, shell: process.platform === "win32" });
+  const r = spawnAz(args);
   if (!quiet && r.stderr) process.stderr.write(r.stderr);
   if (r.status !== 0) {
     throw new Error(`az ${args.join(" ")} failed (status=${r.status}): ${r.stderr || r.stdout}`);
@@ -64,8 +65,31 @@ function az(args, { quiet = false, json = false } = {}) {
 }
 
 function azTry(args) {
-  const r = spawnSync(AZ_CMD, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, shell: process.platform === "win32" });
+  const r = spawnAz(args);
   return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+}
+
+function cmdQuote(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function spawnAz(args) {
+  const options = { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 };
+  if (process.platform !== "win32") return spawnSync(AZ_CMD, args, options);
+  const commandLine = [cmdQuote(AZ_CMD), ...args.map(cmdQuote)].join(" ");
+  return spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", commandLine], options);
+}
+
+function powershell(command) {
+  return redisPortal.powershell(command);
+}
+
+function getClipboardText() {
+  return redisPortal.getClipboardText();
+}
+
+function setClipboardText(value) {
+  return redisPortal.setClipboardText(value);
 }
 
 // ── Helper: ARM REST via management bearer token ─────────────────────────────
@@ -129,11 +153,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nowHHMMSS = () => new Date().toISOString().slice(11, 19);
 
 // ── Helper: portal URL builders ──────────────────────────────────────────────
+function portalRedisUrl({ tenant = "microsoft.onmicrosoft.com", sub, rg, cache, blade = "overview" }) {
+  return redisPortal.portalRedisUrl({ tenant, sub, rg, cache, blade });
+}
 function portalGeoUrl({ tenant = "microsoft.onmicrosoft.com", sub, rg, cache }) {
-  return `https://ms.portal.azure.com/#@${tenant}/resource/subscriptions/${sub}/resourceGroups/${rg}/providers/Microsoft.Cache/Redis/${cache}/geoReplication`;
+  return portalRedisUrl({ tenant, sub, rg, cache, blade: "geoReplication" });
 }
 function portalRebootUrl({ tenant = "microsoft.onmicrosoft.com", sub, rg, cache }) {
-  return `https://ms.portal.azure.com/#@${tenant}/resource/subscriptions/${sub}/resourceGroups/${rg}/providers/Microsoft.Cache/Redis/${cache}/reboot`;
+  return portalRedisUrl({ tenant, sub, rg, cache, blade: "reboot" });
 }
 
 function secondaryRegionDisplay(secondaryName) {
@@ -145,39 +172,80 @@ function secondaryRegionDisplay(secondaryName) {
 
 // ── Helper: tolerant locator click (Portal UI patterns) ──────────────────────
 async function clickByRole(page, role, options, { timeout = 8000, tolerate = false } = {}) {
-  try {
-    await page.getByRole(role, options).click({ timeout });
-    return true;
-  } catch (e) {
-    if (tolerate) {
-      console.log(`[geo] WARN clickByRole tolerated: ${role} ${JSON.stringify(options)} :: ${e.message}`);
-      return false;
-    }
-    throw e;
-  }
+  return redisPortal.clickByRole(page, role, options, { timeout, tolerate });
 }
 
 async function clickByText(page, text, { timeout = 8000, tolerate = false } = {}) {
-  try {
-    await page.getByText(text, { exact: false }).first().click({ timeout });
-    return true;
-  } catch (e) {
-    if (tolerate) {
-      console.log(`[geo] WARN clickByText tolerated: '${text}' :: ${e.message}`);
-      return false;
-    }
-    throw e;
-  }
+  return redisPortal.clickByText(page, text, { timeout, tolerate });
 }
 
 async function closeNotificationsFlyout(page) {
-  // Notifications flyout overlays modal dialogs and intercepts Yes/OK clicks.
-  await clickByRole(
-    page,
-    "button",
-    { name: "Close content 'Notifications'" },
-    { timeout: 2000, tolerate: true }
-  );
+  await redisPortal.closeNotificationsFlyout(page);
+}
+
+async function closeContentPane(page, title) {
+  return redisPortal.closeContentPane(page, title);
+}
+
+async function connectCdpPortalPage({ cdpEndpoint = "http://127.0.0.1:9222", viewport = { width: 1600, height: 900 } } = {}) {
+  return redisPortal.connectCdpPortalPage({ cdpEndpoint, viewport });
+}
+
+async function openRedisBlade({
+  page,
+  cache,
+  subscription,
+  resourceGroup,
+  tenant = "microsoft.onmicrosoft.com",
+  blade = "overview",
+  waitMs = 5000,
+}) {
+  return redisPortal.openRedisBlade({ page, cache, subscription, resourceGroup, tenant, blade, waitMs });
+}
+
+async function copyRedisAccessKeyFromPortal({
+  page,
+  cache,
+  subscription,
+  resourceGroup,
+  tenant = "microsoft.onmicrosoft.com",
+  keyLabel = "Primary key",
+  screenshotPrefix,
+}) {
+  return redisPortal.copyRedisAccessKeyFromPortal({ page, cache, subscription, resourceGroup, tenant, keyLabel, screenshotPrefix });
+}
+
+async function visibleBodyText(page) {
+  return redisPortal.visibleBodyText(page);
+}
+
+async function clickVisibleTextElement(page, pattern, selector = "[role=treeitem],[role=option],button,[role=button]") {
+  return redisPortal.clickVisibleTextElement(page, pattern, selector);
+}
+
+async function openRebootPortSelector(page) {
+  return redisPortal.openRebootPortSelector(page);
+}
+
+async function listVisibleRebootPortOptions(page) {
+  return redisPortal.listVisibleRebootPortOptions(page);
+}
+
+async function selectRebootPorts({ page, ports, allPorts = false, screenshotPath } = {}) {
+  return redisPortal.selectRebootPorts({ page, ports, allPorts, screenshotPath });
+}
+
+async function invokeRedisReboot({
+  page,
+  cache,
+  subscription,
+  resourceGroup,
+  tenant = "microsoft.onmicrosoft.com",
+  ports,
+  allPorts = true,
+  screenshotPrefix,
+}) {
+  return redisPortal.invokeRedisReboot({ page, cache, subscription, resourceGroup, tenant, ports, allPorts, screenshotPrefix });
 }
 
 // ============================================================================
@@ -229,40 +297,37 @@ async function invokeGeoLinkUI({
     throw new Error("invokeGeoLinkUI requires { page, primary, secondary, subscription, resourceGroup }");
   }
   const prefix = screenshotPrefix || `link-${primary}`;
-  const url = portalGeoUrl({ tenant, sub: subscription, rg: resourceGroup, cache: primary });
-
-  await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(5000);
+  await openRedisBlade({ page, cache: primary, subscription, resourceGroup, tenant, blade: "geoReplication", waitMs: 5000 });
 
   // 1) Open Add link picker — command-bar items are NOT menuitem role
-  await page.getByText("Add cache replication link").first().click({ timeout: 10000 });
+  await clickByText(page, "Add cache replication link", { timeout: 10000 });
   await page.waitForTimeout(2000);
 
   // 2) Filter right grid by clicking the secondary's region in the left Location list
   const region = secondaryRegionDisplay(secondary);
   if (region) {
-    await page.getByText(region, { exact: true }).first().click({ timeout: 8000 }).catch(() => { });
+    await redisPortal.clickByText(page, region, { exact: true, timeout: 8000, tolerate: true });
     await page.waitForTimeout(2000);
   } else {
     console.log(`[geo] WARN no region mapping for secondary='${secondary}' — picker may show multiple regions`);
   }
 
   // 3) Click the secondary row — MUST use gridcell role; plain text strict-mode collides with notifications
-  await page.getByRole("gridcell", { name: secondary }).first().click({ timeout: 8000 });
+  await clickByRole(page, "gridcell", { name: secondary }, { timeout: 8000 });
   await page.waitForTimeout(1000);
 
   // 4) Confirm
-  await page.getByRole("button", { name: "Link", exact: true }).click({ timeout: 8000 });
+  await clickByRole(page, "button", { name: "Link", exact: true }, { timeout: 8000 });
   await page.waitForTimeout(3000);
 
   // 5) Submission evidence
   await clickByRole(page, "button", { name: "Notifications" }, { tolerate: true });
-  await page.screenshot({ path: `${prefix}-submit.png`, fullPage: false }).catch(() => { });
+  await redisPortal.captureScreenshot(page, `${prefix}-submit.png`, { fullPage: false });
 
   // 6) Copy-tooltip evidence (Copied tooltip is authoritative; navigator.clipboard.readText is unreliable)
   await clickByRole(page, "button", { name: "Copy to clipboard" }, { tolerate: true });
   await page.waitForTimeout(400);
-  await page.screenshot({ path: `${prefix}-copied.png` }).catch(() => { });
+  await redisPortal.captureScreenshot(page, `${prefix}-copied.png`);
 
   console.log(`LINKED ${primary} -> ${secondary}`);
   return true;
@@ -393,14 +458,12 @@ async function invokeGeoFailover({
     throw new Error("invokeGeoFailover requires { page, cache, subscription, resourceGroup }");
   }
   const prefix = screenshotPrefix || `failover-${cache}`;
-  const url = portalGeoUrl({ tenant, sub: subscription, rg: resourceGroup, cache });
-  await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(5000);
+  await openRedisBlade({ page, cache, subscription, resourceGroup, tenant, blade: "geoReplication", waitMs: 5000 });
 
   await closeNotificationsFlyout(page);
 
   // Failover button — same-text footer link exists; MUST use button role + exact
-  await page.getByRole("button", { name: "Failover", exact: true }).click({ timeout: 8000 });
+  await clickByRole(page, "button", { name: "Failover", exact: true }, { timeout: 8000 });
   await page.waitForTimeout(2000);
 
   // Confirm dialog uses Yes/No; tolerate strict-mode/target-closed errors — trust blade state
@@ -408,7 +471,7 @@ async function invokeGeoFailover({
   await page.waitForTimeout(3000);
 
   await clickByRole(page, "button", { name: "Notifications" }, { tolerate: true });
-  await page.screenshot({ path: `${prefix}-submit.png` }).catch(() => { });
+  await redisPortal.captureScreenshot(page, `${prefix}-submit.png`);
   console.log(`FAILOVER SUBMITTED on ${cache} (trust blade state, not click exit code)`);
   return true;
 }
@@ -431,27 +494,20 @@ async function invokeRebootThenFailover({
   }
 
   // --- Reboot Primary ---
-  await page.goto(portalRebootUrl({ tenant, sub: subscription, rg: resourceGroup, cache: primary }), { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(5000);
+  await openRedisBlade({ page, cache: primary, subscription, resourceGroup, tenant, blade: "reboot", waitMs: 5000 });
 
-  // Port(s) combobox — options are treeitem, NOT option
-  await page.getByRole("combobox", { name: /Port/i }).click({ timeout: 8000 });
-  await page.waitForTimeout(800);
-  await page.getByRole("treeitem", { name: /Replica - 15001/i }).click({ timeout: 8000 });
-  await page.keyboard.press("Escape").catch(() => { });
-  await page.waitForTimeout(500);
+  await selectRebootPorts({ page, allPorts: true, screenshotPath: `reboot-${primary}-ports.png` });
 
-  await page.getByRole("button", { name: "Reboot", exact: true }).click({ timeout: 8000 });
+  await clickByRole(page, "button", { name: "Reboot", exact: true }, { timeout: 8000 });
   // Reboot uses OK/Cancel — NOT Yes/No
-  await page.getByRole("button", { name: "OK", exact: true }).click({ timeout: 8000 });
+  await clickByRole(page, "button", { name: "OK", exact: true }, { timeout: 8000 });
   const tReboot = Date.now();
   console.log(`REBOOT SUBMITTED on ${primary} @ ${new Date(tReboot).toISOString()}`);
 
   // --- Immediate Failover on Secondary (NO WAIT — must be ≤ 2 s) ---
-  await page.goto(portalGeoUrl({ tenant, sub: subscription, rg: resourceGroup, cache: secondary }), { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(3000);
+  await openRedisBlade({ page, cache: secondary, subscription, resourceGroup, tenant, blade: "geoReplication", waitMs: 3000 });
   await closeNotificationsFlyout(page);
-  await page.getByRole("button", { name: "Failover", exact: true }).click({ timeout: 8000 });
+  await clickByRole(page, "button", { name: "Failover", exact: true }, { timeout: 8000 });
   await clickByRole(page, "button", { name: "Yes", exact: true }, { tolerate: true });
   const tFo = Date.now();
   console.log(`FAILOVER SUBMITTED on ${secondary} @ ${new Date(tFo).toISOString()} (delta=${Math.floor((tFo - tReboot) / 1000)}s)`);
@@ -459,7 +515,7 @@ async function invokeRebootThenFailover({
   await page.waitForTimeout(3000);
   await clickByRole(page, "button", { name: "Notifications" }, { tolerate: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(5, 16); // MM-DDTHH-mm
-  await page.screenshot({ path: `reboot-failover-notifications-${stamp}.png` }).catch(() => { });
+  await redisPortal.captureScreenshot(page, `reboot-failover-notifications-${stamp}.png`);
   return { rebootAt: tReboot, failoverAt: tFo, deltaSec: Math.floor((tFo - tReboot) / 1000) };
 }
 
@@ -469,10 +525,10 @@ async function invokeRebootThenFailover({
 async function assertConcurrentNotifications({ page, screenshotPath } = {}) {
   if (!page) throw new Error("page is required");
   const out = screenshotPath || `reboot-failover-notifications-${new Date().toISOString().replace(/[:.]/g, "-").slice(5, 16)}.png`;
-  await page.getByRole("button", { name: "Notifications" }).click({ timeout: 5000 });
-  await page.getByText("Rebooting cache").waitFor({ state: "visible", timeout: 5000 });
-  await page.getByText("Submitting failover request").waitFor({ state: "visible", timeout: 5000 });
-  await page.screenshot({ path: out }).catch(() => { });
+  await clickByRole(page, "button", { name: "Notifications" }, { timeout: 5000 });
+  await redisPortal.waitForVisibleText(page, "Rebooting cache", { timeout: 5000 });
+  await redisPortal.waitForVisibleText(page, "Submitting failover request", { timeout: 5000 });
+  await redisPortal.captureScreenshot(page, out);
   console.log(`[PASS] concurrent Rebooting + Failover notifications observed -> ${out}`);
   return out;
 }
@@ -550,15 +606,13 @@ async function invokeGeoUnlink({
 
   async function tryUI() {
     if (!page) throw new Error("UI mode requires a Playwright page");
-    const url = portalGeoUrl({ tenant, sub: subscription, rg: resourceGroup, cache: caches[0] });
-    await page.goto(url, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(5000);
+    await openRedisBlade({ page, cache: caches[0], subscription, resourceGroup, tenant, blade: "geoReplication", waitMs: 5000 });
     await closeNotificationsFlyout(page);
     // Footer 'Unlink' best-practices link exists; MUST use button role + exact
-    await page.getByRole("button", { name: "Unlink caches", exact: true }).click({ timeout: 8000 });
+    await clickByRole(page, "button", { name: "Unlink caches", exact: true }, { timeout: 8000 });
     await clickByRole(page, "button", { name: "Yes", exact: true }, { tolerate: true });
     await page.waitForTimeout(3000);
-    await page.screenshot({ path: `unlink-${caches[0]}-submit.png` }).catch(() => { });
+    await redisPortal.captureScreenshot(page, `unlink-${caches[0]}-submit.png`);
   }
 
   async function doArm() {
@@ -700,8 +754,24 @@ module.exports = {
   armToken,
   armRequest,
   sleep,
+  portalResourceUrl: redisPortal.portalResourceUrl,
+  portalRedisUrl,
   portalGeoUrl,
   portalRebootUrl,
+  connectCdpPortalPage,
+  openPortalResourceBlade: redisPortal.openPortalResourceBlade,
+  openRedisBlade,
+  visibleBodyText,
+  clickVisibleTextElement,
+  clickByRole,
+  clickByText,
+  waitForVisibleText: redisPortal.waitForVisibleText,
+  captureScreenshot: redisPortal.captureScreenshot,
+  closeContentPane,
+  closeNotificationsFlyout,
+  copyRedisAccessKeyFromPortal,
+  openRebootPortSelector,
+  listVisibleRebootPortOptions,
   // phase helpers
   assertGeoEnv,
   invokeGeoLinkUI,
@@ -709,6 +779,8 @@ module.exports = {
   waitGeoLink,
   assertGeoPair,
   invokeGeoFailover,
+  selectRebootPorts,
+  invokeRedisReboot,
   invokeRebootThenFailover,
   assertConcurrentNotifications,
   assertGeoRoleFlip,
