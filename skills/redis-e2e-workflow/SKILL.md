@@ -121,6 +121,8 @@ of the four Decomposition buckets.
 | Access Policy            | access policy, RBAC, data access, assignment                                              | access-policy-validation     | portal-validation                              |
 | Advanced Settings        | non-SSL port, min TLS, maxmemory policy, cluster shards, Entra auth toggle                | advanced-settings-validation | portal-validation                              |
 | Reboot                   | reboot, restart node, reboot primary, reboot replica                                      | (covered by geo / atomic)    | portal-validation                              |
+| Performance Benchmark    | benchmark, memtier, memtier_benchmark, RPS, throughput, p99 latency, perf test, stress test, SSL 6380 load, run benchmark on VM | redis-benchmark-azure        | redis-benchmark-report-xlsx                    |
+| Benchmark Report         | weekly report, performance xlsx, 表格, txt to xlsx, trend chart, LineChart report, Performance结果.txt, 0515 报告 | redis-benchmark-report-xlsx  | —                                              |
 
 Rules:
 
@@ -239,6 +241,30 @@ Required Skills:
 - access-policy-validation
 - portal-validation
 
+### S15. Redis Performance Benchmark (memtier)
+Trigger: "run benchmark", "memtier benchmark", "perf test", "stress test", "measure RPS", "p99 latency test", "benchmark across SKUs"
+Required Skills:
+- redis-benchmark-azure
+- redis-benchmark-report-xlsx
+Execution note:
+- `redis-benchmark-azure` is a self-contained CLI + SSH automation harness that
+  operates on the fixed perf subscription / `MemtierbenchmarkTest` VMs and
+  `machine2e_group` caches. It is **exempt** from the Portal-click-only
+  execution rule (Phase 10) for its own cache create/start/teardown and VM
+  orchestration, because those run through its bundled scripts (`benchmark.js`
+  → `../../scripts/*`). Do not force its management actions through the Portal.
+- Drive the 0→9 phase gates via `benchmark.js` exports; long monitor waits
+  (`watch`) still follow the repo default `sync` + large timeout pattern.
+
+### S16. Benchmark Weekly Report (txt → xlsx)
+Trigger: "weekly performance xlsx", "那份表格", "0515 那种表格", "convert benchmark txt to xlsx", "add a new week column", "Performance结果.txt"
+Required Skills:
+- redis-benchmark-report-xlsx
+Notes: Regenerate the xlsx from the txt via `report.js` (`scaffoldGenerator` →
+`runGenerator` → `verifyReport`); never `shutil.copyfile` a prior xlsx. Chain
+`redis-benchmark-azure` first only when the source txt must still be produced by
+a live benchmark run.
+
 Catalog miss → Phase 5 (dynamic compose).
 
 ---
@@ -276,6 +302,8 @@ deterministically.
 | S12      | Firewall Rules                    | 50       |                                               |
 | S14      | Firewall 20-Operation Quota       | 60       | More specific than plain S12                  |
 | S13      | Access Policy Assignment          | 50       |                                               |
+| S15      | Redis Performance Benchmark       | 55       | CLI+SSH harness; Portal-only rule exempt      |
+| S16      | Benchmark Weekly Report (xlsx)    | 45       | Report-only; regenerate from txt              |
 | S10      | Basic Cache Creation BVT          | 40       |                                               |
 | S9       | Full E2E (legacy fixed chain)     | 10       | Opt-in only; never wins implicit ties         |
 
@@ -302,10 +330,12 @@ any tier with no matched skill):
    `access-policy-validation`, `redis-persistence`
 3. Data tier: `redis-import-export`
 4. Topology tier: `scale-cache`, `geo-replication-setup`
-5. Validation tier: `portal-validation`
-6. Reliability tier: `azure-portal-reliability`
-7. Teardown: provided by the tier-owning skill (geo / persistence / I-E /
-   cache-creation); never invent a separate teardown step.
+5. Performance tier: `redis-benchmark-azure`
+6. Validation tier: `portal-validation`
+7. Reliability tier: `azure-portal-reliability`
+8. Reporting tier: `redis-benchmark-report-xlsx`
+9. Teardown: provided by the tier-owning skill (geo / persistence / I-E /
+   cache-creation / benchmark); never invent a separate teardown step.
 
 Construction rules:
 
@@ -414,6 +444,8 @@ repository helpers instead of writing ad-hoc per-test scripts.
 | Geo link / failover / unlink / DNS / role flip | [../geo-replication-setup/create-geo.js](../geo-replication-setup/create-geo.js) | `geo-replication-setup` | Only Geo semantics belong here. |
 | Geo default data-plane check | [../geo-replication-setup/geo-data-plane.js](../geo-replication-setup/geo-data-plane.js) | `geo-replication-setup` | Wrapper with primary=`master`, secondary=`slave` defaults. |
 | Redis command output assertions | [../redis-client/redis-client-assertions.js](../redis-client/redis-client-assertions.js) | `redis-client` | Assertion-only; never executes Redis clients. |
+| Orchestrate memtier benchmark end-to-end (create/wait caches, start VMs, deploy runner, write Parameters, start+monitor, pull results, generate unified report, teardown) | [../Redis_Benchmark/benchmark.js](../Redis_Benchmark/benchmark.js) `assertEnv`, `createCaches`, `waitCaches`, `startVms`, `deployRunner`, `updateParameters`, `restart`, `watch`, `pullResults`, `generateReport`, `teardown` | `redis-benchmark-azure` | Self-contained CLI+SSH harness on the perf subscription; exempt from Portal-only rule for its own actions. `watch` uses `sync` + large timeout. |
+| Convert benchmark result txt → weekly xlsx report | [../redis-benchmark-report-xlsx/report.js](../redis-benchmark-report-xlsx/report.js) `scaffoldGenerator`, `runGenerator`, `verifyReport` | `redis-benchmark-report-xlsx` | Regenerate from txt; never copy a prior xlsx. Output must match the published layout 1:1. |
 
 ### Helper Routing Rules
 
@@ -541,6 +573,13 @@ sections — emit empty arrays where applicable.
 - Do NOT use ARM, Azure CLI, REST, SDK calls, `az redis`, `az resource`, or any
   management-plane CLI/API fallback to perform Azure resource operations, even
   when an Atomic Skill exposes such a fallback path.
+- Exemption: `redis-benchmark-azure` is a self-contained performance harness
+  that provisions/starts/tears down its own dedicated perf VMs and caches via
+  bundled CLI + SSH scripts (`benchmark.js`). When the plan runs the benchmark
+  scenario (S15/S16), that skill's own CLI/SSH actions on the perf subscription
+  are permitted and are NOT subject to the Portal-click-only rule. The
+  exemption is scoped to the benchmark harness only; all other skills remain
+  Portal-only.
 - Azure CLI / ARM boundary: CLI or ARM may not be used as the action path or
   the primary pass signal for management-plane work. For Azure resource state,
   prefer Portal-visible evidence. If a test requires data-plane validation
@@ -693,11 +732,15 @@ only the nodes selected in Phase 3 / 4 / 5.
 - workflow reuse redis
 - geo failover only
 - import only / persistence only / scale only
+- benchmark only / memtier benchmark / perf test redis
+- weekly performance xlsx / benchmark report
 - portal click fallback
 - manual UI simulation redis
 - Azure Redis 测试编排器
 - 按 Test Case 动态组合 Skills
 - 只跑 Geo 不要 Persistence
+- 只跑压测 / memtier 性能测试
+- 生成性能周报 xlsx 表格
 - 场景目录命中
 - 场景优先级
 - 缺失 Skill 检测
