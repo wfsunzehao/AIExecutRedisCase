@@ -1,202 +1,191 @@
 # AIExecutRedisCase
 
-A skill-driven repository for Azure Cache for Redis testing and automation.
+AIExecutRedisCase is a skill-driven testing and automation repository for Azure Cache for Redis. It breaks Azure Portal UI automation, Redis data-plane validation, Azure DevOps test asset extraction, performance benchmarking, and report generation into composable Skills that AI agents or test engineers can orchestrate from test cases.
 
-This project brings Azure Portal UI operations, Redis data-plane validation,
-Azure DevOps test asset extraction, and reusable orchestration patterns into
-one workspace. It is designed for:
+## Project Purpose
 
-- Standardized manual test execution steps
-- Playwright/CDP-based Azure Portal automation
-- Redis end-to-end validation (creation, persistence, import/export, geo, etc.)
-- Azure DevOps plan/suite/test-case discovery and integration
-
-## Project Goals
-
-- Provide composable Redis testing capabilities (Skill Library)
-- Improve execution efficiency for complex scenarios through orchestration
-- Support local MCP services so AI agents can invoke test capabilities directly
-- Reduce flakiness in real Azure Portal automation workflows
+- Use `redis-e2e-workflow` as the master entry point to parse test cases and generate a minimal execution plan.
+- Cover Redis creation, deletion, geo-replication, persistence, import/export, firewall, Portal validation, Console validation, and benchmark scenarios through atomic Skills.
+- Use Playwright/CDP to connect to a real authenticated Azure Portal browser session and perform observable, verifiable Portal operations.
+- Expose callable capabilities through local MCP servers, including Node.js scenario MCP servers and the C# Azure DevOps MCP server.
+- Use the bundled Redis Windows client tools for local data-plane command validation.
 
 ## Repository Structure
 
 ```text
 AIExecutRedisCase/
+├─ README.md
 ├─ package.json
-├─ azure-devops-mcp-csharp/         # ADO MCP Server implemented in C#
+├─ azure-devops-mcp-csharp/          # Azure DevOps MCP Server implemented in C#/.NET 8
 ├─ skills/
-│  ├─ cache-creation/               # Create Redis cache through Azure Portal
-│  ├─ cache-deletion/               # Delete Redis cache through Azure Portal
-│  ├─ geo-replication-setup/        # Geo link/failover/unlink capabilities
-│  ├─ redis-import-export/          # Import/export capabilities (Premium/AMR)
-│  ├─ redis-persistence/            # AOF/RDB persistence capabilities
-│  ├─ firewall-rules-test/          # Networking/Firewall rule capabilities
-│  ├─ redis-client/                 # redis-cli/benchmark data-plane validation
-│  ├─ portal-validation/            # Resource blade/control validation
-│  ├─ portal-console/               # In-portal Redis Console validation
-│  ├─ azure-portal-reliability/     # Reliability patterns for Portal automation
-│  ├─ ado-testcase-extractor/       # ADO test asset extraction workflow
-│  ├─ redis-e2e-workflow/           # Master orchestrator skill
-│  ├─ playwright-cli/               # Playwright CLI usage guidance
-│  ├─ portal-bvt-basic-cache-creation/
-│  └─ senior-test-engineer/
+│  ├─ ado-testcase-extractor/        # Read plans, suites, cases, and results through ADO MCP
+│  ├─ azure-portal-reliability/      # Azure Portal automation reliability patterns
+│  ├─ cache-creation/                # Create Azure Cache for Redis through Azure Portal
+│  ├─ cache-deletion/                # Delete Azure Cache for Redis through Azure Portal
+│  ├─ firewall-rules-test/           # Atomic Networking / Firewall capability library
+│  ├─ geo-replication-setup/         # Geo link / failover / unlink / DNS validation
+│  ├─ playwright-cli/                # Playwright CLI usage guidance
+│  ├─ portal-bvt-basic-cache-creation/ # Portal BVT cache creation template
+│  ├─ portal-console/                # Azure Portal Redis Console validation
+│  ├─ portal-validation/             # Portal blade / control / state validation
+│  ├─ Redis_Benchmark/               # memtier_benchmark workflow on Azure VMs
+│  ├─ redis-benchmark-report-xlsx/   # Convert performance txt results to weekly xlsx reports
+│  ├─ redis-client/                  # redis-cli / redis-benchmark data-plane validation
+│  ├─ redis-e2e-workflow/            # Master orchestration Skill
+│  ├─ redis-import-export/           # RDB import/export validation
+│  ├─ redis-persistence/             # AOF / RDB persistence validation
+│  └─ redis-portal/                  # Shared Redis Portal helper library
 └─ tools/
-    └─ redis-client/                 # Bundled Redis client-related config
+   └─ redis-client/                  # redis-cli.exe, redis-benchmark.exe, and Windows configs
 ```
 
-## Core Capability Matrix
+## Core Skill Matrix
 
-- cache-creation: Creates Basic/Standard/Premium caches via Azure Portal,
-   including form fill, deployment monitoring, and success validation.
-- cache-deletion: Executes deletion from the resource Overview page and verifies
-   submission/completion.
-- geo-replication-setup: Provides atomic geo operations such as link, failover,
-   reboot+failover, unlink, and DNS checks.
-- redis-import-export: Provides end-to-end import/export validation, including
-   storage preparation, data population, export/import execution, and checks.
-- redis-persistence: Provides AOF/RDB persistence validation, including prereq
-   checks, configuration, data fill, and blob evidence checks.
-- firewall-rules-test: Provides atomic Firewall/Networking blade operations and
-   rule editing capabilities.
-- portal-validation: Visits and validates resource blades/controls with
-   per-blade outcomes.
-- portal-console: Runs commands like info inside Azure Portal Redis Console and
-   validates output.
-- redis-client: Runs redis-cli/redis-benchmark for data-plane command execution
-   and assertion.
-- azure-portal-reliability: Defines reliability patterns for selectors, waits,
-   iframe handling, and failure recovery.
-- ado-testcase-extractor: Retrieves plans, suites, cases, and results through
-   the local C# MCP server.
-- redis-e2e-workflow: Acts as orchestration entry, dynamically matching and
-   loading required atomic skills from a test case.
+| Skill | Main purpose |
+|---|---|
+| `redis-e2e-workflow` | Master orchestrator. Decomposes test case preconditions, steps, expected results, and validation requirements, then matches the scenario catalog and lazily loads only the required atomic Skills. |
+| `cache-creation` | Creates Basic / Standard / Premium Redis caches through Azure Portal and validates deployment success. |
+| `cache-deletion` | Deletes a cache from the resource Overview page and validates submission and completion state. |
+| `geo-replication-setup` | Covers geo link, failover, reboot + failover, unlink, DNS checks, and role switch validation. |
+| `redis-import-export` | Covers RDB export/import, Storage preparation, data population, and post-import validation. |
+| `redis-persistence` | Covers AOF / RDB persistence configuration, data writes, save triggers, and Blob evidence validation. |
+| `firewall-rules-test` | Atomic capability library for the Networking / Firewall blade, including rule add, edit, delete, discard, quota banner, and ARM fallback operations. |
+| `portal-validation` | Validates Portal resource blades, control states, text signals, button availability, and resource status. |
+| `portal-console` | Executes commands in Azure Portal Redis Console and validates output, such as `info`. |
+| `redis-client` | Uses the bundled `redis-cli.exe` / `redis-benchmark.exe` for data-plane command execution and assertions. |
+| `redis-portal` | Reuses Edge CDP connection, Redis blade navigation, visible-text click fallbacks, notification cleanup, Access Key copy, Reboot, and other Portal helpers. |
+| `azure-portal-reliability` | Defines Portal automation reliability rules for selectors, iframes, waits, login drift, and failure recovery. |
+| `ado-testcase-extractor` | Reads Azure DevOps test plans, suites, cases, runs, and results through the local C# MCP server. |
+| `Redis_Benchmark` | Orchestrates end-to-end memtier_benchmark performance tests on a specified Azure VM/cache environment. This Skill depends on the external PowerShell/Python companion scripts and permissions described in its own documentation. |
+| `redis-benchmark-report-xlsx` | Converts Memtier performance result txt files into weekly xlsx reports while preserving the existing 0515-style layout, trend blocks, and charts. |
+| `portal-bvt-basic-cache-creation` | Template Skill for the Azure Cache for Redis Portal BVT basic cache creation case. |
+| `playwright-cli` | Guidance for browser automation, page snapshots, element interaction, session management, and Playwright debugging. |
 
 ## Tech Stack
 
-- Node.js (scripts and MCP wrappers)
-- Playwright (browser automation)
-- C# / .NET 8 (Azure DevOps MCP server)
-- Azure CLI (resource and management-plane validation)
+- Node.js: Skill helpers, MCP wrappers, and command entry points.
+- Playwright: Azure Portal browser automation, usually through Edge CDP attached to a real signed-in session.
+- C# / .NET 8: Azure DevOps MCP Server.
+- Azure CLI: Resource state checks, management-plane validation, and auxiliary verification.
+- Redis Windows tools: Bundled `redis-cli.exe` and `redis-benchmark.exe`.
 
 ## Prerequisites
 
-Recommended environment:
+Windows + PowerShell is the recommended execution environment.
 
-- Windows (this repository primarily uses Windows paths and PowerShell)
 - Node.js 18+
 - .NET SDK 8+
-- Azure CLI (logged in with access to target subscription)
-- Microsoft Edge (for CDP attach, commonly port 9222)
+- Azure CLI, signed in with access to the target subscription
+- Microsoft Edge, preferably launched with a CDP debugging port such as `9222`
+- Playwright browser dependencies
+- Access to the target Azure subscription, resource group, and cache resources
 
-For ADO MCP capabilities, also set:
+Azure DevOps MCP also requires these environment variables:
 
-- AZURE_DEVOPS_ORG
-- AZURE_DEVOPS_PROJECT
-- AZURE_DEVOPS_TOKEN
+```powershell
+$env:AZURE_DEVOPS_ORG="https://dev.azure.com/<org>"
+$env:AZURE_DEVOPS_PROJECT="<project>"
+$env:AZURE_DEVOPS_TOKEN="<pat>"
+```
 
-## Install Dependencies
+The PAT needs at least Test Management read permission. Do not commit tokens to the repository.
 
-From repository root:
+## Installation
+
+Install Node dependencies from the repository root:
 
 ```powershell
 npm install
 ```
 
-To build the C# MCP server:
+Build the Azure DevOps MCP Server:
 
 ```powershell
-cd azure-devops-mcp-csharp
+Set-Location .\azure-devops-mcp-csharp
 dotnet restore
 dotnet build
 ```
 
-## Quick Start
+## Common Commands
 
-### 1) Start common local MCP services (Node)
+All test cases can be provided to the AI chat and executed through natural language instructions. However, a model with strong comprehension capabilities (e.g., GPT‑5.5) is required.
 
-Predefined scripts in package.json:
+`package.json` currently provides these command entries:
 
 ```powershell
+# Open the bundled redis-cli.exe
+npm run redis:cli
+
+# Run the geo data-plane helper script
+npm run geo:data-plane
+
+# Start the cache creation MCP Server
 npm run mcp:cache-creation
+
+# Start the geo replication MCP Server
 npm run mcp:geo-replication-setup
 ```
 
-### 2) Run Redis CLI (repository tool entry)
+Other Skills that contain `mcp/server.js` can also be started directly, for example:
 
 ```powershell
-npm run redis:cli
+node .\skills\firewall-rules-test\mcp\server.js
+node .\skills\redis-import-export\mcp\server.js
+node .\skills\redis-persistence\mcp\server.js
+node .\skills\Redis_Benchmark\mcp\server.js
+node .\skills\redis-benchmark-report-xlsx\mcp\server.js
 ```
 
-### 3) Start Azure DevOps MCP server (C#)
+Start the Azure DevOps MCP Server:
 
 ```powershell
-cd azure-devops-mcp-csharp
+Set-Location .\azure-devops-mcp-csharp
 dotnet run
 ```
 
 After startup, MCP-capable clients can call:
 
-- get-test-plans
-- get-test-suites
-- get-test-cases
-- get-test-plan-details
-- get-test-results
-- get-test-runs
+- `get-test-plans`
+- `get-test-suites`
+- `get-test-cases`
+- `get-test-plan-details`
+- `get-test-results`
+- `get-test-runs`
+
+
 
 ## Recommended Workflow
 
-1. Use redis-e2e-workflow to parse a test case and generate a minimal
-    execution plan.
-2. Load atomic skills by scenario, for example:
-    cache-creation -> geo-replication-setup -> portal-validation.
-3. Add redis-client when data-plane validation is required.
-4. Use ado-testcase-extractor when ADO plan/case integration is needed
-    (depends on the C# MCP server).
-5. Reuse azure-portal-reliability patterns for all Portal automation work.
+1. If the task comes from an Azure DevOps test case, use `ado-testcase-extractor` to read the plan, suite, and case first.
+2. Use `redis-e2e-workflow` to decompose the test case and emit a Discovery Summary plus the minimal Skill execution plan.
+3. Load atomic Skills by scenario, for example `cache-creation` -> `geo-replication-setup` -> `portal-validation`.
+4. Add `redis-client` when data-plane validation is required; add `portal-console` when Portal Console validation is required.
+5. For Portal automation reliability, follow `azure-portal-reliability` and the CDP rules from the `redis-portal` helpers.
+6. For long-running workflows, keep logs, screenshots, or other observable evidence instead of relying only on verbal results.
 
-## Azure Portal Automation Best Practices
+## Azure Portal Automation Conventions
 
-- Attach to an existing Edge CDP session whenever possible; avoid launching
-   duplicate browser instances.
-- Use stable readiness signals (spinner gone + content stable + fingerprint
-   stable) instead of fixed sleeps.
-- Validate key state changes (deployment complete, blade switched, failover
-   result) with observable evidence.
-- For long-running steps (deployment, import/export, persistence save), use
-   generous timeouts and keep execution logs.
+- Prefer attaching to the user's existing signed-in Edge CDP session. The default endpoint is `http://127.0.0.1:9222`.
+- If the login state drifts, stop execution and ask the user to complete sign-in or verification in the browser before continuing.
+- Use stable readiness signals such as spinner disappearance, stable content, target text visibility, and button state changes.
+- Use generous timeouts for deployments, import/export, persistence saves, geo failover, benchmark watch phases, and other long-running steps.
+- Leave verifiable evidence for every important state change, such as Portal text, activity log entries, DNS queries, Redis command output, or file size checks.
 
-## FAQ
+## Notes
 
-### Q1: When should I use redis-e2e-workflow vs. a single skill?
+- This repository can create, delete, fail over, reboot, import/export, and benchmark real Azure resources. Always confirm the subscription, resource group, cache name, and SKU before execution.
+- The `Redis_Benchmark` Skill describes fixed performance test subscriptions, resource groups, VMs, SSH keys, and external script requirements. The current repository root does not contain a `scripts/` directory, so confirm the companion scripts and permissions before running it.
+- `redis-benchmark-report-xlsx` requires a correctly formatted Memtier performance result txt input and should generate the xlsx according to the Skill documentation. Do not copy an old report as a substitute for a new generated result.
+- Sensitive values such as Azure DevOps PATs, Redis access keys, and SSH private keys should only live in local environment variables, MCP client configuration, or secure credential storage.
 
-- Use redis-e2e-workflow for complex or variable test scenarios.
-- Use a single atomic skill when scope is clear (for example, only import/export).
+## Maintenance Guidelines
 
-### Q2: What should I check if ADO MCP returns no data?
+- Prefer atomic and composable design when adding new capabilities: one Skill should own one clear capability boundary.
+- Each `SKILL.md` should define Use When, Do Not Use When, Required Inputs, execution steps, validation criteria, and failure handling.
+- If you add an MCP wrapper or a commonly used command, update `package.json` and this README together.
+- If a helper API changes, update the corresponding Skill documentation so the docs and implementation do not drift.
 
-Check the following first:
+## References
 
-- Whether PAT is expired
-- Whether PAT includes Test Management read scope
-- Whether AZURE_DEVOPS_ORG and AZURE_DEVOPS_PROJECT are correct
-
-### Q3: What should I do if Portal automation is flaky?
-
-Check the following first:
-
-- Whether stable selectors and iframe enumeration are used
-- Whether login/session drift occurred
-- Whether fixed sleeps are used without stability checks
-
-## Contribution Guidelines
-
-- Prefer atomic + composable design when adding new capabilities.
-- In each skill doc, clearly define Use When / Do Not Use When / Required Inputs
-   / validation criteria.
-- Keep scripts and SKILL.md aligned to avoid documentation/implementation drift.
-
-## Disclaimer
-
-This repository is intended for testing and automation engineering practice.
-Before execution, always verify the target subscription, resource group, and
-cache name to avoid accidental operations on production resources.
+- See `azure-devops-mcp-csharp/README.md` for Azure DevOps MCP Server details.
+- Scenario-specific execution details live in each `skills/<skill-name>/SKILL.md` file.
